@@ -19,7 +19,7 @@ function header(currentAdmin: CurrentAdmin | null): HtmlFragment {
   return html`
     <div class="card-header">
       <div class="brand">
-        <a href="/admin">workfluxs-feedback-bot</a><span class="sep">/</span>admin
+        <a href="/admin">issuary</a><span class="sep">/</span>admin
       </div>
       <div class="user">
         ${currentAdmin
@@ -62,7 +62,7 @@ export function renderPage(opts: PageOpts): HtmlFragment {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   ${opts.refreshSeconds ? raw(`<meta http-equiv="refresh" content="${opts.refreshSeconds}">`) : html``}
-  <title>${opts.title} · workfluxs-feedback-bot</title>
+  <title>${opts.title} · issuary</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="/admin/static/app.css">
@@ -78,7 +78,7 @@ export function renderPage(opts: PageOpts): HtmlFragment {
         ${opts.body}
       </div>
     </div>
-    <footer>workfluxs-feedback-bot · admin</footer>
+    <footer>issuary · admin</footer>
   </div>
 </body>
 </html>`;

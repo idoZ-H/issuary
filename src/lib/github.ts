@@ -67,7 +67,7 @@ export class GitHubClient {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${this.token}`,
           "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "workfluxs-feedback-bot",
+          "User-Agent": "issuary",
           ...(init.headers ?? {}),
         },
       });
@@ -317,7 +317,7 @@ export async function getInstallationToken(
     Authorization: `Bearer ${jwt}`,
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "workfluxs-feedback-bot",
+    "User-Agent": "issuary",
   };
 
   const instRes = await fetcher(`https://api.github.com/repos/${repo}/installation`, { headers: ghHeaders });

@@ -101,7 +101,7 @@ async function makeCachedFetcher(env: Env): Promise<CacheBoundFetcher> {
         headers: {
           "authorization": `Bearer ${token}`,
           "accept": "application/vnd.github+json",
-          "user-agent": "workfluxs-feedback-bot",
+          "user-agent": "issuary",
           "x-github-api-version": "2022-11-28",
         },
       });

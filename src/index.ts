@@ -29,7 +29,7 @@ function flushTraces(ctx: ExecutionContext): void {
 async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname === "/" && req.method === "GET") {
-    return Response.json({ ok: true, service: "workfluxs-feedback-bot", version: "1.0" });
+    return Response.json({ ok: true, service: "issuary", version: "1.0" });
   }
   if (url.pathname === "/telegram/webhook") {
     if (req.method !== "POST") return new Response("method not allowed", { status: 405 });

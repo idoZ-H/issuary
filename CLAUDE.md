@@ -1,4 +1,4 @@
-# CLAUDE.md — workfluxs-feedback-bot
+# CLAUDE.md — issuary
 
 Cloudflare Worker that turns client Telegram messages into structured GitHub Issues via Claude (Opus 4.8 classifier, Sonnet 4.6 closure-DM) with tool use, GitHub App auth, GCS media storage, Gemini voice transcription, and LangSmith tracing. Multi-project per client; Hebrew client replies, English issue bodies (for downstream code-agent compatibility).
 
@@ -47,7 +47,7 @@ This bit `TelegramClient`, `GitHubClient`, and `GcsClient` simultaneously.
 ### GitHub App auth
 
 - **PEM keys from GitHub are PKCS#1**, but Web Crypto's `importKey("pkcs8", ...)` only accepts PKCS#8. We have an ASN.1 wrapper (`pkcs1ToPkcs8`) in `src/lib/github.ts` that prefixes the right `PrivateKeyInfo` envelope. Don't try to feed PKCS#1 directly.
-- **GitHub API rejects requests without a `User-Agent` header** with a confusing 403 ("Request forbidden by administrative rules"). Workers' `fetch` doesn't set one by default. We always send `User-Agent: workfluxs-feedback-bot` on both `getInstallationToken` and `GitHubClient.request`.
+- **GitHub API rejects requests without a `User-Agent` header** with a confusing 403 ("Request forbidden by administrative rules"). Workers' `fetch` doesn't set one by default. We always send `User-Agent: issuary` on both `getInstallationToken` and `GitHubClient.request`.
 - **GitHub code search is unreliable on private repos.** The index lags hours after creation, sometimes stays empty entirely. `getRepoTree` uses `/repos/{repo}/git/trees/{branch}?recursive=1` instead — that endpoint is always current. The classifier prompt explicitly tells the model the directory listing is authoritative and to fall back to it when search returns 0 results.
 
 ### Multi-project per client

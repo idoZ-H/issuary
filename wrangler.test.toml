@@ -3,7 +3,7 @@
 # `id` values below are placeholders — vitest runs against Miniflare's local
 # in-memory KV keyed by binding NAME (see vitest.config.ts), so these ids are
 # never used. Your real namespace ids live in the gitignored wrangler.toml.
-name = "workfluxs-feedback-bot"
+name = "issuary"
 main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]

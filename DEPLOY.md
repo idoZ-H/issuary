@@ -170,7 +170,7 @@ Capture the printed Worker URL. Health check:
 
 ```bash
 curl https://<your-worker>.workers.dev/
-# → {"ok":true,"service":"workfluxs-feedback-bot","version":"1.0"}
+# → {"ok":true,"service":"issuary","version":"1.0"}
 ```
 
 ## 7. Register the Telegram webhook
