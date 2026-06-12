@@ -1,0 +1,73 @@
+name = "your-worker-name"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Run `npx wrangler kv namespace create <BINDING>` to provision each namespace
+# and paste the returned id below. The bindings/order matter; do not rename.
+
+[[kv_namespaces]]
+binding = "CLIENTS"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "ADMINS"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "REPO_CONTEXT"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "RECENT_ACTIVITY"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "PENDING_CLASSIFICATION"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "CONVERSATION_HISTORY"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "RATE_LIMITS"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "ISSUE_TO_CHAT"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "DEDUP"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "ADMIN_SESSIONS"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "ISSUE_LIST_CACHE"
+id = "<your-kv-id>"
+
+[[kv_namespaces]]
+binding = "CODE_INDEX_META"
+id = "<your-kv-id>"
+
+# Semantic code retrieval (shadow). Workers AI generates bge embeddings;
+# Vectorize stores them. Create the index once with:
+#   npx wrangler vectorize create feedback-code-index --dimensions=768 --metric=cosine
+#   npx wrangler vectorize create-metadata-index feedback-code-index --property-name=repo --type=string
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "CODE_INDEX"
+index_name = "feedback-code-index"
+
+# Background code-index maintenance. Keep this INFREQUENT: each list() tick
+# counts against the KV free-tier 1,000 lists/day cap, and re-indexing re-embeds
+# the whole repo against the Workers AI 10,000 neurons/day cap. */30 keeps a
+# 7-day-TTL index warm with headroom to spare; */1 starved both free tiers.
+[triggers]
+crons = ["*/30 * * * *"]

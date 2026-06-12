@@ -1,0 +1,21 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+wrangler.toml
+dist/
+*.log
+.DS_Store
+.worktrees/
+.superpowers/
+.playwright-mcp/
+# Claude Code local state + nested feature worktrees (carry real KV ids / local settings)
+.claude/
+# Ops scratch output (regenerable, not part of the project)
+index-rebuild-check.txt
+# Vercel best-practices boilerplate — irrelevant to this Cloudflare Worker
+AGENTS.md
+# Seeded from real client messages (LangSmith) — regenerable, kept out of git.
+eval/golden-set.json

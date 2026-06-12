@@ -1,0 +1,57 @@
+# Test-only Worker config for vitest-pool-workers. Mirrors wrangler.toml minus
+# the [ai] / [[vectorize]] blocks (which crash Miniflare's startup). The KV
+# `id` values below are placeholders — vitest runs against Miniflare's local
+# in-memory KV keyed by binding NAME (see vitest.config.ts), so these ids are
+# never used. Your real namespace ids live in the gitignored wrangler.toml.
+name = "workfluxs-feedback-bot"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "CLIENTS"
+id = "00000000000000000000000000000001"
+
+[[kv_namespaces]]
+binding = "ADMINS"
+id = "00000000000000000000000000000002"
+
+[[kv_namespaces]]
+binding = "REPO_CONTEXT"
+id = "00000000000000000000000000000003"
+
+[[kv_namespaces]]
+binding = "RECENT_ACTIVITY"
+id = "00000000000000000000000000000004"
+
+[[kv_namespaces]]
+binding = "PENDING_CLASSIFICATION"
+id = "00000000000000000000000000000005"
+
+[[kv_namespaces]]
+binding = "CONVERSATION_HISTORY"
+id = "00000000000000000000000000000006"
+
+[[kv_namespaces]]
+binding = "RATE_LIMITS"
+id = "00000000000000000000000000000007"
+
+[[kv_namespaces]]
+binding = "ISSUE_TO_CHAT"
+id = "00000000000000000000000000000008"
+
+[[kv_namespaces]]
+binding = "DEDUP"
+id = "00000000000000000000000000000009"
+
+[[kv_namespaces]]
+binding = "ADMIN_SESSIONS"
+id = "0000000000000000000000000000000a"
+
+[[kv_namespaces]]
+binding = "ISSUE_LIST_CACHE"
+id = "0000000000000000000000000000000b"
+
+[[kv_namespaces]]
+binding = "CODE_INDEX_META"
+id = "0000000000000000000000000000000c"
