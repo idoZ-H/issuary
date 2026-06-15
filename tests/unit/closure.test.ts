@@ -21,6 +21,20 @@ describe("draftClosureMessage", () => {
     expect(text).toContain("תיקנו");
   });
 
+  it("falls back to a default message when Claude throws (API error)", async () => {
+    const claude = {
+      sdk: {
+        messages: {
+          create: vi.fn(async () => { throw new Error("anthropic 529 overloaded"); }),
+        },
+      },
+    };
+    const text = await draftClosureMessage(claude as any, {
+      title: "Export button broken", closing_comment: "Fixed",
+    });
+    expect(text).toBe("הטיקט נסגר.");
+  });
+
   it("falls back to a default message when Claude returns no text block", async () => {
     const claude = {
       sdk: {

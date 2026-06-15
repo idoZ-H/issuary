@@ -9,6 +9,8 @@ import type { CodeChunk } from "../../src/lib/chunker";
 export const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
 export const EMBED_DIM = 768;
 export const RETRIEVAL_TOP_K = 6;
+export const RERANK_MODEL = "@cf/baai/bge-reranker-base";
+export const RETRIEVAL_CANDIDATE_K = 24;
 
 interface StoredChunk {
   repo: string;
@@ -96,4 +98,16 @@ export async function queryChunks(
       snippet: s.snippet,
       score: 0.9,
     }));
+}
+
+// Order-preserving stub rerank (Miniflare has no Workers AI). Mirrors the real
+// rerankChunks signature; keeps cosine order so retrieval tests that inject the
+// stub stay deterministic. Tests exercising rerank reordering inject their own.
+export async function rerankChunks(
+  _env: Env,
+  _query: string,
+  chunks: RetrievedChunk[],
+  topK: number = RETRIEVAL_TOP_K
+): Promise<RetrievedChunk[]> {
+  return chunks.slice(0, topK);
 }

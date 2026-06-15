@@ -55,10 +55,15 @@ export const CLASSIFIER_TOOLS: Anthropic.Tool[] = [
         query: {
           type: "string",
           description:
-            "Search query — keywords drawn directly from the user's report. Examples: 'export button', 'Dashboard.tsx', 'project page', 'TypeError: Cannot read properties of undefined'. Prefer 1-3 words; GitHub code search rewards specificity over verbosity.",
+            "Keyword query for GitHub's literal code search — keywords drawn directly from the user's report. Examples: 'export button', 'Dashboard.tsx', 'project page', 'TypeError: Cannot read properties of undefined'. Prefer 1-3 words; GitHub code search rewards specificity over verbosity.",
+        },
+        semantic_query: {
+          type: "string",
+          description:
+            "A ONE-SENTENCE natural-language description of the code or behavior you expect to find — written as if describing the relevant source file, not as keywords. This drives the semantic (embedding-based) search, which matches meaning rather than exact tokens and is far more reliable than GitHub code search on private repos. Describe the mechanism, e.g. 'the function that sends the WhatsApp agency-quote message to the group after a lead is created' rather than 'whatsapp agency'. Phrasing it as a hypothetical code description (HyDE) materially improves retrieval.",
         },
       },
-      required: ["query"],
+      required: ["query", "semantic_query"],
     },
     strict: true,
   } as unknown as Anthropic.Tool,

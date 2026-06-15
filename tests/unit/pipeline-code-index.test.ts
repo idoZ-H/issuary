@@ -6,6 +6,7 @@ import {
   isExcludedFromCodeIndex,
   formatQueryForEmbedding,
   BGE_QUERY_PREFIX,
+  RETRIEVAL_CANDIDATE_K,
 } from "../../src/pipeline/code-index";
 import { putIndexManifest } from "../../src/lib/kv";
 import { CHUNKER_VERSION, type Chunker, type CodeChunk } from "../../src/lib/chunker";
@@ -347,6 +348,49 @@ describe("retrieveCode", () => {
     expect(captured).toEqual([
       "Represent this sentence for searching relevant passages: login button broken",
     ]);
+  });
+
+  it("over-fetches a wider candidate set and reranks it down to the top-K", async () => {
+    await putIndexManifest(env as any, "acme/rerank", {
+      repo: "acme/rerank",
+      fetched_at: new Date(FIXED_NOW).toISOString(),
+      chunk_count: 8,
+      chunker_version: CHUNKER_VERSION,
+      status: "complete",
+      cursor: 0,
+      paths: ["a.ts"],
+    });
+    // bge cosine returns these 8 candidates in a compressed band; the reranker
+    // reverses the order (h best), proving the final result reflects the rerank.
+    const candidates = ["a", "b", "c", "d", "e", "f", "g", "h"].map((p, i) => ({
+      path: `${p}.ts`,
+      start_line: 1,
+      end_line: 10,
+      snippet: `chunk ${p}`,
+      score: 0.7 + i * 0.001,
+    }));
+    let requestedTopK = -1;
+    let rerankSawCandidates = 0;
+    const rerankVec = {
+      embedTexts: async () => [new Array(768).fill(0)],
+      upsertChunks: vecStub.upsertChunks,
+      queryChunks: async (_e: any, _r: string, _v: number[], topK: number) => {
+        requestedTopK = topK;
+        return candidates;
+      },
+      rerankChunks: async (_e: any, _q: string, chunks: any[], topK: number) => {
+        rerankSawCandidates = chunks.length;
+        return [...chunks].reverse().slice(0, topK);
+      },
+    };
+    const res = await retrieveCode(env as any, "acme/rerank", "duplicate whatsapp message", { vec: rerankVec as any });
+    expect(requestedTopK).toBe(RETRIEVAL_CANDIDATE_K); // over-fetched, not just 6
+    expect(rerankSawCandidates).toBe(8);
+    expect(res.status).toBe("ok");
+    if (res.status === "ok") {
+      expect(res.chunks).toHaveLength(6); // narrowed to RETRIEVAL_TOP_K
+      expect(res.chunks[0]!.path).toBe("h.ts"); // reranked winner, not the cosine top
+    }
   });
 });
 

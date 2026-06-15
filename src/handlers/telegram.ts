@@ -2,7 +2,7 @@ import type { Env } from "../types";
 import { verifyTelegramSecret, TelegramClient, safeSend, escapeHtml } from "../lib/telegram";
 import { parseTelegramUpdate } from "../lib/telegram-update";
 import { resolveIdentity } from "../pipeline/identity";
-import { checkAndIncrementMsgRate, recordSpend } from "../pipeline/rate-limit";
+import { checkAndIncrementMsgRate, recordSpend, estimateClassifierCostCents } from "../pipeline/rate-limit";
 import { findRecentActivity, recordActivity } from "../pipeline/recency";
 import { processAttachments } from "../pipeline/media";
 import { fetchCodebaseContext } from "../pipeline/codebase-context";
@@ -14,12 +14,12 @@ import { notifyClient, notifyClientWithProject, notifyIdo } from "../pipeline/no
 import { ClaudeClient, transcribeWithGemini } from "../lib/ai";
 import { GcsClient } from "../lib/gcs";
 import { GitHubClient } from "../lib/github";
-import { ToolDispatcher } from "../tools/dispatch";
+import { ToolDispatcher, isLowGrounding } from "../tools/dispatch";
 import { CLASSIFIER_TOOLS } from "../tools/definitions";
 import { buildClassifierSystem } from "../prompts/classifier";
-import { getPending, putPending, deletePending, putIssueChat, getActiveProject, getClient, putClient, getHistory, appendTurn } from "../lib/kv";
+import { getPending, putPending, deletePending, putIssueChat, getActiveProject, getClient, putClient, getHistory, appendTurn, recordClassification } from "../lib/kv";
 import type { ParsedCallbackQuery, ParsedTelegramMessage } from "../lib/telegram-update";
-import type { ClientRecord, RetrievedChunk } from "../types";
+import type { ClientRecord, RetrievedChunk, ClassificationRecord } from "../types";
 import { buildPickerKeyboard } from "../lib/picker";
 import { handleAdminCommand } from "./admin";
 
@@ -264,8 +264,40 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
     tools: CLASSIFIER_TOOLS,
   });
 
-  // Rough spend estimate: 1¢ per classification (covers Sonnet input/output).
-  await recordSpend(env, parsed.tg_user_id, 1);
+  // Spend accounting from the run's actual Opus 4.8 token usage (final turns
+  // carry usage; clarify/error turns don't surface it, so fall back to a nominal
+  // 1¢ so they still count toward the soft daily cap).
+  const spendCents = result.kind === "final" ? estimateClassifierCostCents(result.usage) : 1;
+  await recordSpend(env, parsed.tg_user_id, spendCents);
+
+  // Durable per-classification outcome record + grounding signal. The grounding
+  // is observed across the dispatcher's github_search_code calls; low_grounding
+  // flags the documented failure mode (code search empty + weak semantic match).
+  // persist() merges branch-specific fields and writes best-effort (no-op when
+  // the CLASSIFICATIONS namespace isn't provisioned).
+  const grounding = dispatcher.getGrounding();
+  const lowGrounding = isLowGrounding(grounding);
+  const usage = result.kind === "final" ? result.usage : { input_tokens: 0, output_tokens: 0 };
+  const persistClassification = async (extra: Partial<ClassificationRecord> = {}): Promise<void> => {
+    await recordClassification(env, {
+      ts: new Date().toISOString(),
+      tg_user_id: parsed.tg_user_id,
+      reporter_name: id.record.name,
+      repo: activeProject.repo,
+      project_id: activeProject.id,
+      user_text: parsed.text,
+      result_kind: result.kind,
+      github_search_calls: grounding.github_search_calls,
+      github_total_matches: grounding.github_total_matches,
+      semantic_calls: grounding.semantic_calls,
+      top_semantic_score: grounding.top_semantic_score,
+      low_grounding: lowGrounding,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cost_cents: spendCents,
+      ...extra,
+    });
+  };
 
   if (id.record.shadow_mode && result.kind === "final") {
     // Wait for any in-flight shadow retrievals so the comparison is captured.
@@ -285,6 +317,7 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
     await appendTurn(env, parsed.tg_user_id, activeProject.id, { role: "assistant", text: result.question_he }).catch((e) => {
       console.warn("history_append_failed", { stage: "clarify", error: (e as Error).message });
     });
+    await persistClassification();
     return Response.json({ action: "asked_clarifying_question", question_he: result.question_he });
   }
   if (result.kind === "error") {
@@ -297,6 +330,7 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
       action: "error", reporter_name: id.record.name, repo: activeProject.repo, message: result.message,
       project_name_he: activeProject.name_he,
     });
+    await persistClassification();
     return Response.json({ action: "classifier_error", message: result.message });
   }
 
@@ -316,6 +350,7 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
       message: result.output.client_reply_he,
       project_name_he: activeProject.name_he,
     });
+    await persistClassification({ type: result.output.type, should_create_issue: false });
     return Response.json({ action: "out_of_scope" });
   }
 
@@ -347,7 +382,14 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
       issue_number: written.number, issue_url: written.url,
       type: result.output.type, severity: result.output.severity, sensitive: result.output.sensitive,
       project_name_he: activeProject.name_he,
+      low_grounding: lowGrounding,
       ...(mediaErrors.length > 0 ? { media_errors: mediaErrors } : {}),
+    });
+    await persistClassification({
+      type: result.output.type, severity: result.output.severity,
+      should_create_issue: result.output.should_create_issue,
+      is_followup_to_issue: result.output.is_followup_to_issue,
+      issue_number: written.number,
     });
     return Response.json({ action: "created", number: written.number });
   }
@@ -358,11 +400,21 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
       project_name_he: activeProject.name_he,
       ...(mediaErrors.length > 0 ? { media_errors: mediaErrors } : {}),
     });
+    await persistClassification({
+      type: result.output.type, severity: result.output.severity,
+      should_create_issue: result.output.should_create_issue,
+      is_followup_to_issue: result.output.is_followup_to_issue,
+      issue_number: written.number,
+    });
     return Response.json({ action: "comment", number: written.number });
   }
   await notifyIdo(tg, inboxChatId, {
     action: "skipped", reporter_name: id.record.name, repo: activeProject.repo,
     project_name_he: activeProject.name_he,
+  });
+  await persistClassification({
+    type: result.output.type, severity: result.output.severity,
+    should_create_issue: result.output.should_create_issue,
   });
   return Response.json({ action: "skipped" });
 }

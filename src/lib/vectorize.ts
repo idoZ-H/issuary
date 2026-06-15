@@ -13,6 +13,15 @@ export const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
 export const EMBED_DIM = 768;
 export const RETRIEVAL_TOP_K = 6;
 
+// Cross-encoder reranker. The bi-encoder embedding (bge-base) returns cosine
+// scores in a narrow, uncalibrated band (~0.71–0.74 even for the right chunk),
+// so the margin between the correct file and noise is thin. We over-fetch a
+// wider candidate set from Vectorize (RETRIEVAL_CANDIDATE_K) and let the
+// reranker re-score query↔chunk pairs jointly, which both reorders within that
+// band and yields a calibrated [0,1] relevance score the operator can read.
+export const RERANK_MODEL = "@cf/baai/bge-reranker-base";
+export const RETRIEVAL_CANDIDATE_K = 24;
+
 const SNIPPET_MAX_CHARS = 1000;
 
 // Vectorize vector ids are capped (64 bytes), and repo+path+line easily exceeds
@@ -81,4 +90,34 @@ export async function queryChunks(
     snippet: String(m.metadata?.snippet ?? ""),
     score: m.score ?? 0,
   }));
+}
+
+// Rerank candidate chunks against the query with the bge cross-encoder, return
+// the top-K reordered with their calibrated relevance score. The reranker takes
+// the RAW query (not the bge asymmetric query prefix — that's only for the
+// bi-encoder embedding). Workers AI returns { response: [{ id, score }] } sorted
+// best-first, where id indexes into the contexts array. On an empty/malformed
+// response we fall back to the incoming (cosine) order so retrieval never gets
+// worse than without reranking.
+export async function rerankChunks(
+  env: Env,
+  query: string,
+  chunks: RetrievedChunk[],
+  topK: number = RETRIEVAL_TOP_K
+): Promise<RetrievedChunk[]> {
+  if (chunks.length === 0) return [];
+  const res = (await env.AI.run(RERANK_MODEL as any, {
+    query,
+    contexts: chunks.map((c) => ({ text: c.snippet })),
+    top_k: topK,
+  } as any)) as unknown as { response?: Array<{ id: number; score: number }> };
+  const ranked = res?.response ?? [];
+  if (ranked.length === 0) return chunks.slice(0, topK);
+  return ranked
+    .map((r) => {
+      const c = chunks[r.id];
+      return c ? { ...c, score: r.score } : null;
+    })
+    .filter((c): c is RetrievedChunk => c !== null)
+    .slice(0, topK);
 }

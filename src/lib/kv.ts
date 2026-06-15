@@ -1,7 +1,7 @@
 import type {
   Env, ClientRecord, ProjectRecord, RepoContext, RecentActivity,
   PendingClassification, IssueToChat, AdminRecord, ConversationHistory, ConversationTurn,
-  CodeIndexManifest,
+  CodeIndexManifest, ClassificationRecord,
 } from "../types";
 
 const RECENT_TTL_S = 60;
@@ -301,6 +301,38 @@ export async function getIssueChat(env: Env, repo: string, issueNumber: number):
 
 export async function putIssueChat(env: Env, repo: string, issueNumber: number, ic: IssueToChat): Promise<void> {
   await env.ISSUE_TO_CHAT.put(`${repo}/${issueNumber}`, JSON.stringify(ic), { expirationTtl: ISSUE_TO_CHAT_TTL_S });
+}
+
+// 90 days: long enough to be the durable record LangSmith retention isn't, and
+// to seed the eval golden set, while still self-bounding the namespace.
+const CLASSIFICATION_TTL_S = 90 * 24 * 60 * 60;
+
+// Persist one classification outcome. Best-effort: a missing binding (namespace
+// not yet provisioned) or any KV error is swallowed so it never blocks the
+// response — same contract as recordActivity/appendTurn. The key is
+// timestamp-led so a list+sort is cheap at this volume; tg_user_id and issue
+// number disambiguate same-instant records.
+export async function recordClassification(env: Env, rec: ClassificationRecord): Promise<void> {
+  if (!env.CLASSIFICATIONS) return;
+  const key = `${rec.ts}:${rec.tg_user_id}:${rec.issue_number ?? "x"}`;
+  await env.CLASSIFICATIONS.put(key, JSON.stringify(rec), { expirationTtl: CLASSIFICATION_TTL_S })
+    .catch((e) => { console.warn("record_classification_failed", { error: (e as Error).message }); });
+}
+
+// Most-recent-first classification records, capped at `limit`. Returns [] when
+// the binding is absent. Volume is low, so we list and sort in-process rather
+// than maintaining a secondary index.
+export async function getRecentClassifications(env: Env, limit: number): Promise<ClassificationRecord[]> {
+  if (!env.CLASSIFICATIONS) return [];
+  const list = await env.CLASSIFICATIONS.list({ limit: 1000 }).catch(() => null);
+  if (!list) return [];
+  const records = await Promise.all(
+    list.keys.map((k) => env.CLASSIFICATIONS!.get<ClassificationRecord>(k.name, "json"))
+  );
+  return records
+    .filter((r): r is ClassificationRecord => r !== null)
+    .sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0))
+    .slice(0, limit);
 }
 
 export async function dedupCheck(env: Env, key: string): Promise<boolean> {

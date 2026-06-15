@@ -56,6 +56,38 @@ describe("handleGitHubWebhook", () => {
     expect(tgSent).toEqual([[50, "תיקנו! תודה."]]);
   });
 
+  it("notifies Ido and still returns 200 when the closure DM fails to send", async () => {
+    (env as any).IDO_INBOX_CHAT_ID = "-100";
+    const sent: Array<[number, string]> = [];
+    const fakeTg = {
+      sendMessage: vi.fn(async (c: number, t: string) => {
+        if (c === 50) throw new Error("telegram 403 bot blocked by user");
+        sent.push([c, t]);
+        return { message_id: 1 };
+      }),
+    };
+    const body = JSON.stringify({
+      action: "closed",
+      issue: { number: 42, title: "Bug", state: "closed", body: "" },
+      repository: { full_name: "x/y" },
+      sender: { login: "idoZ" },
+      comment: undefined,
+    });
+    const req = new Request("https://w/github/webhook", {
+      method: "POST",
+      headers: { "X-Hub-Signature-256": await sign(body), "content-type": "application/json", "X-GitHub-Event": "issues" },
+      body,
+    });
+    const res = await handleGitHubWebhook(req, env as any, undefined, {
+      tgFactory: () => fakeTg as any,
+      draftClosure: (async () => "תיקנו! תודה.") as any,
+    });
+    expect(res.status).toBe(200);
+    const j = await res.json<any>();
+    expect(j.action).toBe("closure_dm_failed");
+    expect(sent.some(([c]) => c === -100)).toBe(true); // Ido got an error notice
+  });
+
   it("ignores actions other than 'closed'", async () => {
     const body = JSON.stringify({ action: "opened", issue: { number: 1, title: "T", body: "" }, repository: { full_name: "x/y" }, sender: {} });
     const req = new Request("https://w/github/webhook", {

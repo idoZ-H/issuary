@@ -14,7 +14,10 @@ import type { GitHubClient } from "../lib/github";
 import { LineWindowChunker, type Chunker, type CodeChunk } from "../lib/chunker";
 import { getIndexManifest, putIndexManifest, isIndexFresh } from "../lib/kv";
 import * as realVec from "../lib/vectorize";
-import { RETRIEVAL_TOP_K } from "../lib/vectorize";
+import { RETRIEVAL_TOP_K, RETRIEVAL_CANDIDATE_K } from "../lib/vectorize";
+
+// Re-export so callers/tests get the candidate fan-out width from one place.
+export { RETRIEVAL_CANDIDATE_K } from "../lib/vectorize";
 
 // Big enough to index large single-file apps (e.g. a 460KB admin SPA) — these
 // are often the MOST important files to find. They chunk into line-windows like
@@ -76,6 +79,9 @@ export interface VectorizeDeps {
   upsertChunks: typeof realVec.upsertChunks;
   queryChunks: typeof realVec.queryChunks;
   deleteFileVectors?: typeof realVec.deleteFileVectors;
+  // Optional cross-encoder rerank stage. Present in production (realVec) and the
+  // test stub; inline test doubles that omit it fall back to plain cosine order.
+  rerankChunks?: typeof realVec.rerankChunks;
 }
 
 // Pure tree diff: given the manifest's stored path→sha map and the current tree
@@ -446,6 +452,13 @@ export async function retrieveCode(
   // A missing/empty embedding (malformed AI response) must not become a bogus
   // zero-vector query — report no matches instead.
   if (!queryVector || queryVector.length === 0) return { status: "ok", chunks: [] };
-  const chunks = await vec.queryChunks(env, repo, queryVector, RETRIEVAL_TOP_K);
+  // Over-fetch a wide candidate set on the cheap bi-encoder, then narrow to the
+  // top-K with the cross-encoder reranker. The reranker takes the raw query (not
+  // the bge embedding prefix). Falls back to plain cosine top-K when no reranker
+  // is wired (legacy/inline test doubles).
+  const candidates = await vec.queryChunks(env, repo, queryVector, RETRIEVAL_CANDIDATE_K);
+  const chunks = vec.rerankChunks
+    ? await vec.rerankChunks(env, query, candidates, RETRIEVAL_TOP_K)
+    : candidates.slice(0, RETRIEVAL_TOP_K);
   return { status: "ok", chunks };
 }

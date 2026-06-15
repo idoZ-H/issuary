@@ -14,6 +14,10 @@ export interface IdoNotification {
   message?: string;
   project_name_he?: string;
   media_errors?: MediaError[];
+  // Set on "created" when the model filed the issue without confident code
+  // grounding (github code search empty + weak/no semantic match). Surfaces the
+  // documented failure mode as an actionable line in the digest.
+  low_grounding?: boolean;
 }
 
 export async function notifyClient(tg: TelegramClient, chatId: number, text: string): Promise<void> {
@@ -60,6 +64,7 @@ export async function notifyIdo(
       break;
   }
   if (n.project_name_he) lines.push(`Project: ${escapeHtml(n.project_name_he)}`);
+  if (n.low_grounding) lines.push("⚠️ low grounding — code search found no confident match; double-check the cited files.");
   if (n.media_errors && n.media_errors.length > 0) {
     const summary = n.media_errors.map((e) => `${e.kind} ${e.stage}`).join(", ");
     lines.push(`⚠️ Media errors: ${escapeHtml(summary)}`);

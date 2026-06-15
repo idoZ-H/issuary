@@ -32,6 +32,28 @@ describe("notifier", () => {
     expect(args[2]).toEqual({ parseMode: "HTML" });
   });
 
+  it("appends a low-grounding warning when the issue was filed without confident code grounding", async () => {
+    const tg = { sendMessage: vi.fn(async (_chatId: number, _text: string, _opts?: unknown) => ({ message_id: 9 })) };
+    await notifyIdo(tg as any, -1, {
+      action: "created", reporter_name: "Yossi", repo: "x/y",
+      issue_number: 7, issue_url: "u", type: "bug", severity: "high", sensitive: false,
+      low_grounding: true,
+    });
+    const text = tg.sendMessage.mock.calls[0]![1];
+    expect(text).toContain("⚠️");
+    expect(text.toLowerCase()).toContain("grounding");
+  });
+
+  it("omits the low-grounding warning when grounding was fine", async () => {
+    const tg = { sendMessage: vi.fn(async (_chatId: number, _text: string, _opts?: unknown) => ({ message_id: 10 })) };
+    await notifyIdo(tg as any, -1, {
+      action: "created", reporter_name: "Yossi", repo: "x/y",
+      issue_number: 8, issue_url: "u", type: "bug", severity: "high", sensitive: false,
+    });
+    const text = tg.sendMessage.mock.calls[0]![1];
+    expect(text.toLowerCase()).not.toContain("grounding");
+  });
+
   it("prefixes sensitive notifications with a lock", async () => {
     const tg = { sendMessage: vi.fn(async (_chatId: number, _text: string, _opts?: unknown) => ({ message_id: 3 })) };
     await notifyIdo(tg as any, -1, {

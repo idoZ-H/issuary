@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { env } from "cloudflare:test";
 import { handleTelegramWebhook } from "../../src/handlers/telegram";
-import { putClient, putRepoContext } from "../../src/lib/kv";
+import { putClient, putRepoContext, getRecentClassifications } from "../../src/lib/kv";
 
 const SECRET = "tg-secret";
 
@@ -78,6 +78,47 @@ describe("handleTelegramWebhook end-to-end (mocked deps)", () => {
     expect(fakeIssue).toHaveBeenCalledOnce();
     const recipients = tgSent.map(([c]) => c);
     expect(recipients).toEqual(expect.arrayContaining([50, -100]));
+  });
+
+  it("persists a classification outcome record after creating an issue", async () => {
+    const fakeClassifier = vi.fn(async () => ({
+      kind: "final" as const,
+      output: {
+        should_create_issue: true, is_followup_to_issue: null,
+        type: "bug" as const, severity: "high" as const,
+        title_en: "Export broken", body_he: "ב",
+        suggested_labels: ["dashboard"], sensitive: false, client_reply_he: "תודה!",
+      },
+      usage: { input_tokens: 10000, output_tokens: 1000 },
+    }));
+    const fakeIssue = vi.fn(async () => ({ kind: "created" as const, number: 77, url: "u" }));
+    const fakeTg = {
+      sendMessage: vi.fn(async () => ({ message_id: 1 })),
+      react: vi.fn(async () => undefined), getFilePath: vi.fn(), downloadFile: vi.fn(),
+    };
+    const update = {
+      update_id: 1,
+      message: { message_id: 100, from: { id: 50, first_name: "Yossi" }, chat: { id: 50 }, date: 1, text: "the export button is broken" },
+    };
+    const req = new Request("https://w/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": SECRET, "content-type": "application/json" },
+      body: JSON.stringify(update),
+    });
+    await handleTelegramWebhook(req, env as any, {
+      tgFactory: () => fakeTg as any,
+      ghFactory: () => ({ getRepoTree: async () => [], getReadme: async () => "", listRecentIssues: async () => [] } as any),
+      classify: fakeClassifier as any,
+      writeIssue: fakeIssue as any,
+    });
+
+    const records = await getRecentClassifications(env as any, 10);
+    const mine = records.find((r) => r.issue_number === 77);
+    expect(mine).toBeDefined();
+    expect(mine!.result_kind).toBe("final");
+    expect(mine!.type).toBe("bug");
+    expect(mine!.should_create_issue).toBe(true);
+    expect(mine!.cost_cents).toBeGreaterThan(0); // priced from real token usage
   });
 
   it("returns asked_clarifying_question when classifier pauses", async () => {
