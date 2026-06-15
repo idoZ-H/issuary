@@ -4,12 +4,51 @@ import type { RetrievedChunk } from "../types";
 export interface ToolCall { name: string; input: any }
 export interface ToolResult { is_error: boolean; content: string; pause_for_clarification?: boolean }
 
+// Retrieval grounding observed across a ticket's github_search_code calls. Lets
+// the handler tell how well the model could ground its answer — the documented
+// failure mode (github code search empty + only weak semantic matches) is
+// exactly github_total_matches===0 with a low top_semantic_score.
+export interface GroundingStats {
+  github_search_calls: number;
+  github_total_matches: number;
+  semantic_calls: number;
+  top_semantic_score: number | null;
+}
+
+// Calibrated relevance floor below which the best reranked semantic match is
+// treated as "no confident grounding". The reranker (bge-reranker-base) emits a
+// [0,1] relevance score, so unlike the raw bi-encoder cosine band this is a
+// meaningful threshold. Tunable from production observation.
+export const LOW_GROUNDING_SCORE = 0.3;
+
+// True when the model tried to ground its answer in code but came up empty:
+// github code search returned nothing AND the best semantic match was weak or
+// absent. This is the documented failure signature (private-repo code search is
+// unreliable, and the bi-encoder can miss). Returns false when the model never
+// searched — grounding isn't expected for every message (e.g. chitchat).
+export function isLowGrounding(g: GroundingStats): boolean {
+  if (g.github_search_calls === 0) return false;
+  if (g.github_total_matches > 0) return false;
+  return g.top_semantic_score === null || g.top_semantic_score < LOW_GROUNDING_SCORE;
+}
+
 const MAX_TOOL_CALLS = 4;
 const MAX_CLARIFICATIONS = 1;
 
 export class ToolDispatcher {
   private toolCallCount = 0;
   private clarificationCount = 0;
+  private grounding: GroundingStats = {
+    github_search_calls: 0,
+    github_total_matches: 0,
+    semantic_calls: 0,
+    top_semantic_score: null,
+  };
+
+  // Snapshot of retrieval grounding accumulated so far this ticket.
+  getGrounding(): GroundingStats {
+    return { ...this.grounding };
+  }
 
   constructor(
     private readonly gh: GitHubClient,
@@ -54,12 +93,25 @@ export class ToolDispatcher {
       switch (call.name) {
         case "github_search_code": {
           const r = await this.gh.searchCode(this.repo, call.input.query);
+          // HyDE: the model supplies a natural-language hypothesis (semantic_query)
+          // for the embedding search, which embeds meaning far better than the
+          // keyword `query`. Fall back to query when absent (defensive).
+          const semanticQuery: string = call.input.semantic_query || call.input.query;
           if (this.shadowRetrieve) {
-            try { this.shadowRetrieve(call.input.query); } catch { /* best-effort */ }
+            try { this.shadowRetrieve(semanticQuery); } catch { /* best-effort */ }
           }
           let semantic: RetrievedChunk[] = [];
           if (this.retrieveActive) {
-            try { semantic = await this.retrieveActive(call.input.query); } catch (e) { console.warn("semantic_retrieve_failed", { repo: this.repo, error: (e as Error).message }); /* best-effort: fall back to github result only */ }
+            try { semantic = await this.retrieveActive(semanticQuery); } catch (e) { console.warn("semantic_retrieve_failed", { repo: this.repo, error: (e as Error).message }); /* best-effort: fall back to github result only */ }
+          }
+          this.grounding.github_search_calls++;
+          this.grounding.github_total_matches += r.total ?? r.matches?.length ?? 0;
+          if (semantic.length > 0) {
+            this.grounding.semantic_calls++;
+            const best = Math.max(...semantic.map((c) => c.score));
+            this.grounding.top_semantic_score = this.grounding.top_semantic_score === null
+              ? best
+              : Math.max(this.grounding.top_semantic_score, best);
           }
           const content = semantic.length > 0
             ? JSON.stringify({ github_search: r, semantic_matches: semantic })

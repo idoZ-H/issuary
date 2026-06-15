@@ -14,6 +14,14 @@ describe("CLASSIFIER_TOOLS", () => {
     ]);
   });
 
+  it("github_search_code carries a required semantic_query (HyDE) field for NL retrieval", () => {
+    const t = CLASSIFIER_TOOLS.find((x) => x.name === "github_search_code") as any;
+    expect(t.input_schema.properties.semantic_query).toBeDefined();
+    expect(t.input_schema.properties.semantic_query.type).toBe("string");
+    expect(t.input_schema.required).toContain("semantic_query");
+    expect(t.input_schema.required).toContain("query");
+  });
+
   it("each tool has a description, input_schema, and strict:true", () => {
     for (const t of CLASSIFIER_TOOLS) {
       expect(t.description!.length).toBeGreaterThan(50);

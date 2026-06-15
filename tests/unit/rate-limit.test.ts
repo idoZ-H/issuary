@@ -1,9 +1,27 @@
 // tests/unit/rate-limit.test.ts
 import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:test";
-import { checkAndIncrementMsgRate, recordSpend } from "../../src/pipeline/rate-limit";
+import { checkAndIncrementMsgRate, recordSpend, estimateClassifierCostCents } from "../../src/pipeline/rate-limit";
 
 const HOUR_KEY_FIXED = "2026-04-29T14";
+
+describe("estimateClassifierCostCents", () => {
+  it("prices input and output tokens at the Opus 4.8 rate ($15/$75 per MTok)", () => {
+    // 10K input @ $15/MTok = $0.15 = 15c; 1K output @ $75/MTok = $0.075 = 7.5c
+    const cents = estimateClassifierCostCents({ input_tokens: 10_000, output_tokens: 1_000 });
+    expect(cents).toBeCloseTo(22.5, 4);
+  });
+
+  it("returns 0 for a zero-token usage", () => {
+    expect(estimateClassifierCostCents({ input_tokens: 0, output_tokens: 0 })).toBe(0);
+  });
+
+  it("weights output tokens 5x input (Opus output is 5x the input price)", () => {
+    const inputOnly = estimateClassifierCostCents({ input_tokens: 1000, output_tokens: 0 });
+    const outputOnly = estimateClassifierCostCents({ input_tokens: 0, output_tokens: 1000 });
+    expect(outputOnly).toBeCloseTo(inputOnly * 5, 4);
+  });
+});
 
 describe("rate limiter", () => {
   it("allows the first 30 messages per hour", async () => {

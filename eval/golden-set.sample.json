@@ -1,0 +1,26 @@
+{
+  "_comment": "Synthetic, committed golden set for the CI eval gate (tests/unit/eval-harness.test.mjs) and for running `npm run eval` without the gitignored real golden-set.json. The `retrieved` arrays here encode a known-good retriever so the gate has a stable floor; replace with real captured retrievals (via eval/seed.mjs) to measure the live system. Paths are illustrative, not real client code.",
+  "k": 6,
+  "cases": [
+    {
+      "query": "whatsapp agency duplicate message two links",
+      "expected": ["src/services/whatsapp.js"],
+      "retrieved": ["src/services/whatsapp.js", "src/controllers/insuranceController.js", "src/routes.js"]
+    },
+    {
+      "query": "export button on dashboard does nothing",
+      "expected": ["src/components/Dashboard.tsx"],
+      "retrieved": ["src/components/Dashboard.tsx", "src/components/ExportMenu.tsx"]
+    },
+    {
+      "query": "allow uploading passport photo from gallery not only camera",
+      "expected": ["src/components/forms/photo-upload.tsx"],
+      "retrieved": ["src/components/forms/photo-upload.tsx", "src/app/register/page.tsx", "src/app/api/upload/route.ts"]
+    },
+    {
+      "query": "agency quote token generated twice different iat",
+      "expected": ["src/services/insuranceAccessTokens.js"],
+      "retrieved": ["src/controllers/insuranceController.js", "src/services/insuranceAccessTokens.js", "src/routes.js"]
+    }
+  ]
+}

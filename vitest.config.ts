@@ -24,7 +24,7 @@ export default defineWorkersConfig({
             "CLIENTS", "ADMINS", "REPO_CONTEXT", "RECENT_ACTIVITY",
             "PENDING_CLASSIFICATION", "RATE_LIMITS", "ISSUE_TO_CHAT", "DEDUP",
             "ADMIN_SESSIONS", "ISSUE_LIST_CACHE", "CONVERSATION_HISTORY",
-            "CODE_INDEX_META",
+            "CODE_INDEX_META", "CLASSIFICATIONS",
           ],
         },
       },

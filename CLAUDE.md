@@ -84,6 +84,15 @@ This bit `TelegramClient`, `GitHubClient`, and `GcsClient` simultaneously.
 - **Worker secrets are write-only.** `wrangler secret put` stores them; nothing reads them back. There is **no `wrangler secret get`** — `wrangler secret list` returns names + type only, never values. To rotate `TELEGRAM_WEBHOOK_SECRET`: `openssl rand -hex 32` → pipe to `npx wrangler secret put TELEGRAM_WEBHOOK_SECRET` (auto-deploys with the new secret) → `setWebhook` with the new value. Same path for any secret you can't dig out of a password manager.
 - **Local `.env` ≠ deployed secrets.** The local `.env` holds only a subset (dev/CLI tokens like `CLOUDFLARE_API_TOKEN`, `ANTHROPIC_API_KEY`). Deploy-only secrets — `TELEGRAM_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `GCS_BUCKET` — exist **exclusively as Worker secrets** and are not in `.env`. Consequence: you **cannot call internal endpoints from your laptop** (e.g. `POST /internal/index-step`, whose auth is `X-Internal-Secret: TELEGRAM_WEBHOOK_SECRET`) — the secret isn't there, you get 401. Debug via `wrangler tail` + an in-app trigger instead, not by curling internal routes.
 
+## Retrieval pipeline (embed → over-fetch → rerank → HyDE)
+
+- **Two-stage retrieval.** `retrieveCode` (`src/pipeline/code-index.ts`) embeds the query with the bge prefix, over-fetches `RETRIEVAL_CANDIDATE_K=24` candidates from Vectorize, then narrows to `RETRIEVAL_TOP_K=6` with the **cross-encoder reranker `@cf/baai/bge-reranker-base`** (`rerankChunks` in `src/lib/vectorize.ts`). The bi-encoder cosine band is narrow/uncalibrated (~0.71–0.74 even for the right chunk); the reranker reorders within that band and returns a calibrated [0,1] relevance score. Reranker takes the RAW query, not the bge embedding prefix. Adds one `env.AI.run` per `github_search_code` call (neuron cost) — `bge-reranker-base` must be on the Workers AI plan.
+- **HyDE.** `github_search_code` now requires a `semantic_query` field (`src/tools/definitions.ts`): a one-sentence natural-language hypothesis the model writes, used for the embedding while the keyword `query` still drives GitHub code search. Dispatcher routes them in `src/tools/dispatch.ts`.
+- **Grounding signal + low-grounding flag.** `ToolDispatcher.getGrounding()` accumulates github match counts + top semantic score across a ticket. `isLowGrounding()` flags the documented failure (github code search empty + weak/no semantic match); the handler passes it to `notifyIdo` (a `⚠️ low grounding` digest line) and into the classification record.
+- **Classification records.** Every classification writes a `ClassificationRecord` (outcome + grounding + token cost) via `recordClassification` to the **optional `CLASSIFICATIONS` KV namespace**. ⚠️ The binding is OPTIONAL and writes are best-effort no-ops until provisioned — **to activate: `wrangler kv namespace create CLASSIFICATIONS`, add the binding to the gitignored `wrangler.toml`, deploy.** Read recent via `getRecentClassifications`. Spend is priced from real Opus 4.8 token usage (`estimateClassifierCostCents`, `src/pipeline/rate-limit.ts`), not the old flat 1¢.
+- **Eval gate.** `npm run eval` scores `eval/golden-set.json` (gitignored) or falls back to the committed synthetic `eval/golden-set.sample.json`. `tests/unit/eval-harness.test.mjs` gates the scoring pipeline + sample in CI (recall floor 0.8). The live retriever can't run offline, so this gates the harness, not real retrieval.
+- ⚠️ The reranker + HyDE change live classification behavior — validate on real workloads before trusting (per the Opus-tuning caveats above).
+
 ## Semantic code index — ops & debugging
 
 - **Inspect prod state via KV (read-only, safe).** Per-repo index manifests live in the `CODE_INDEX_META` namespace, keyed by `owner/repo`; client records live in `CLIENTS`, keyed by `tg_user_id`. Get the binding→namespace-id map from the **gitignored `wrangler.toml`** (not committed — don't hardcode the ids here), then: `wrangler kv key get --namespace-id=<id> "owner/repo" --remote` and `wrangler kv key list --namespace-id=<id> --remote`. A manifest's `status` goes `building` → `complete`; `cursor` / `chunk_count` show progress. **No manifest = never indexed.**
@@ -101,7 +110,7 @@ This bit `TelegramClient`, `GitHubClient`, and `GcsClient` simultaneously.
 
 ## Tests
 
-- `npm test` — all 508 tests via vitest-pool-workers (real Miniflare KV).
+- `npm test` — all 533 tests via vitest-pool-workers (real Miniflare KV).
 - `npm run typecheck` — tsc --noEmit. Currently clean (zero errors), with `noUncheckedIndexedAccess` enabled in `tsconfig.json`.
 - The compatibility-date warning during tests (`requested 2026-01-01 vs runtime 2024-12-30`) is harmless — workerd just falls back to its supported max.
 - `tests/stubs/langsmith*.ts` are the langsmith aliases for the test runtime; do not delete.

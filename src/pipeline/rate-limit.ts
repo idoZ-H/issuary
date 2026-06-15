@@ -3,6 +3,25 @@ import type { Env } from "../types";
 const MSG_CAP_PER_HOUR = 30;
 const SPEND_CAP_CENTS_PER_DAY = 200;  // $2.00
 
+// Opus 4.8 list price, in cents per million tokens: $15/MTok input, $75/MTok
+// output. The classifier runs on claude-opus-4-8 (see ai.ts). We deliberately
+// price only the uncached input_tokens + output_tokens the classifier loop
+// sums (classifier.ts) — cache_read/cache_creation tokens aren't threaded
+// through ClassifierResult.usage, so this is a (safe) slight OVER-estimate for
+// the soft daily spend cap: caching makes the real bill lower, never higher.
+const OPUS_INPUT_CENTS_PER_MTOK = 1500;
+const OPUS_OUTPUT_CENTS_PER_MTOK = 7500;
+
+// Estimate the cents spent on one classifier run from its token usage. Replaces
+// the old flat "1¢ per classification" guess, which was both wrong (it predated
+// the Sonnet→Opus 4.8 move) and blind to message size.
+export function estimateClassifierCostCents(usage: { input_tokens: number; output_tokens: number }): number {
+  return (
+    (usage.input_tokens / 1_000_000) * OPUS_INPUT_CENTS_PER_MTOK +
+    (usage.output_tokens / 1_000_000) * OPUS_OUTPUT_CENTS_PER_MTOK
+  );
+}
+
 export interface RateCheck {
   allowed: boolean;
   reason?: "hourly_message_cap" | "daily_spend_cap";

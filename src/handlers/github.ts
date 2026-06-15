@@ -4,6 +4,7 @@ import { TelegramClient } from "../lib/telegram";
 import { ClaudeClient } from "../lib/ai";
 import { getClient, getIssueChat, listClients, canonicalizeRepo } from "../lib/kv";
 import { draftClosureMessage } from "../pipeline/closure";
+import { notifyIdo } from "../pipeline/notifier";
 import { applyIncremental, isExcludedFromCodeIndex } from "../pipeline/code-index";
 import { continueIndexBuild } from "./index-step";
 
@@ -126,7 +127,20 @@ async function handleGitHubWebhookImpl(req: Request, env: Env, ctx: ExecutionCon
     ? `→ ${project.name_he}\n─────\n${draftedMessage}`
     : draftedMessage;
 
-  await tg.sendMessage(ic.telegram_chat_id, message);
+  // The closure DM is the client's only signal their issue was resolved, and
+  // the outer handler swallows errors into a 200 — so a failed send would be
+  // invisible. Surface it to Ido's inbox instead of letting it vanish.
+  try {
+    await tg.sendMessage(ic.telegram_chat_id, message);
+  } catch (e) {
+    await notifyIdo(tg, Number(env.IDO_INBOX_CHAT_ID), {
+      action: "error",
+      reporter_name: client?.name ?? String(ic.tg_user_id),
+      repo,
+      message: `Closure DM failed to send for #${number}: ${(e as Error).message}`,
+    });
+    return Response.json({ action: "closure_dm_failed", number });
+  }
   return Response.json({ action: "notified", number });
 }
 

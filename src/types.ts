@@ -61,6 +61,35 @@ export interface CodeIndexManifest {
 }
 
 // A code chunk returned from semantic retrieval, shaped for the classifier.
+// One durable outcome record per classification — the owned, queryable memory
+// of what the classifier saw, did, and how well it could ground its answer.
+// Stored in the (optional) CLASSIFICATIONS KV namespace. Volume is low, so the
+// admin view lists and sorts in-process.
+export interface ClassificationRecord {
+  ts: string;                          // ISO timestamp (caller-supplied, sortable)
+  tg_user_id: number;
+  reporter_name: string;
+  repo: string;
+  project_id: string;
+  user_text: string;
+  result_kind: "final" | "clarify" | "error";
+  type?: string;
+  severity?: string;
+  should_create_issue?: boolean;
+  is_followup_to_issue?: number | null;
+  issue_number?: number;
+  // Retrieval grounding (from ToolDispatcher.getGrounding()).
+  github_search_calls: number;
+  github_total_matches: number;
+  semantic_calls: number;
+  top_semantic_score: number | null;
+  low_grounding: boolean;
+  // Spend.
+  input_tokens: number;
+  output_tokens: number;
+  cost_cents: number;
+}
+
 export interface RetrievedChunk {
   path: string;
   start_line: number;
@@ -156,6 +185,11 @@ interface KnownBindings {
   ADMIN_SESSIONS: KVNamespace;
   ISSUE_LIST_CACHE: KVNamespace;
   CODE_INDEX_META: KVNamespace; // per-repo code-index freshness manifest
+  // Durable per-classification outcome record (durable observability layer).
+  // OPTIONAL: writes are best-effort and skipped when the binding is absent, so
+  // the code ships safely before the namespace is provisioned. To activate:
+  // create the namespace and add the binding to the gitignored wrangler.toml.
+  CLASSIFICATIONS?: KVNamespace;
   // Workers AI + Vectorize for semantic code retrieval
   AI: Ai;
   CODE_INDEX: Vectorize;

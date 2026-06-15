@@ -13,11 +13,18 @@ import { dirname, join } from "node:path";
 import { recallAtK, mrr, aggregate } from "./metrics.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FILE = join(HERE, "golden-set.json");
+const REAL = join(HERE, "golden-set.json");
+const SAMPLE = join(HERE, "golden-set.sample.json");
 
+// Prefer the real (gitignored) golden set; fall back to the committed synthetic
+// sample so `npm run eval` works out of the box (and in CI) without secrets.
+const FILE = existsSync(REAL) ? REAL : SAMPLE;
 if (!existsSync(FILE)) {
-  console.error(`No golden set at ${FILE}. Run: node eval/seed.mjs`);
+  console.error(`No golden set at ${REAL} or ${SAMPLE}. Run: node eval/seed.mjs`);
   process.exit(1);
+}
+if (FILE === SAMPLE) {
+  console.log("(no real golden-set.json — scoring the committed synthetic sample)");
 }
 
 const { k = 6, cases } = JSON.parse(readFileSync(FILE, "utf8"));
