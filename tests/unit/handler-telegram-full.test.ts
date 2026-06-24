@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { env } from "cloudflare:test";
 import { handleTelegramWebhook } from "../../src/handlers/telegram";
-import { putClient, putRepoContext, getRecentClassifications, getPending } from "../../src/lib/kv";
+import { putClient, putRepoContext, getRecentClassifications, getPending, putPending } from "../../src/lib/kv";
 
 const SECRET = "tg-secret";
 
@@ -185,5 +185,50 @@ describe("handleTelegramWebhook end-to-end (mocked deps)", () => {
     });
     const pend = await getPending(env as any, 51, "proj-z");
     expect(pend?.questions_asked).toBe(1);
+  });
+
+  it("preserves the ORIGINAL message text and increments to 2 when re-asking on the answer turn", async () => {
+    await putClient(env as any, 52, {
+      name: "W", telegram_chat_id: 52,
+      active: true, created_at: "2026-04-29T00:00:00Z",
+      projects: [{ id: "proj-w", name_he: "w", repo: "x/w", created_at: "2026-04-29T00:00:00Z" }],
+      active_project_id: "proj-w", default_project_id: "proj-w",
+    });
+    await putRepoContext(env as any, "x/w", {
+      tree: "src/", readme: "R", recent_issues: [], fetched_at: "t",
+    });
+    // Simulate turn 2: a pending record from the FIRST question already exists,
+    // anchored on the client's true original request.
+    await putPending(env as any, 52, "proj-w", {
+      raw_message_id: 1, raw_message_text: "ORIGINAL REQUEST", attachments: [],
+      asked_question_he: "q1?", asked_at: "2026-06-24T00:00:00Z", questions_asked: 1,
+    });
+    const fakeTg = {
+      sendMessage: vi.fn(async () => ({ message_id: 1 })),
+      react: vi.fn(async () => undefined),
+      getFilePath: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const update = {
+      update_id: 2,
+      message: { message_id: 2, from: { id: 52, first_name: "W" }, chat: { id: 52 }, date: 2, text: "my answer to q1" },
+    };
+    const req = new Request("https://w/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": SECRET, "content-type": "application/json" },
+      body: JSON.stringify(update),
+    });
+    await handleTelegramWebhook(req, env as any, {
+      tgFactory: () => fakeTg as any,
+      ghFactory: () => ({ getRepoTree: async () => [], getReadme: async () => "", listRecentIssues: async () => [] } as any),
+      classify: (async (a: any) => {
+        await a.dispatcher.dispatch({ name: "ask_clarifying_question", input: { question_he: "q2?", reason_en: "r" } });
+        return { kind: "clarify" as const, question_he: "q2?" };
+      }) as any,
+    });
+    const pend = await getPending(env as any, 52, "proj-w");
+    // Original request text is preserved, NOT overwritten with "my answer to q1".
+    expect(pend?.raw_message_text).toBe("ORIGINAL REQUEST");
+    expect(pend?.questions_asked).toBe(2);
   });
 });

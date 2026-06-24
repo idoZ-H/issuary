@@ -1,4 +1,5 @@
 import type { RepoContext, ConversationTurn } from "../types";
+import { MAX_TICKET_CLARIFICATIONS } from "../types";
 
 export interface BuildArgs {
   reporter_name: string;
@@ -67,6 +68,7 @@ Clarifying-question policy — ASK when you would otherwise have to GUESS:
   - "## Open questions (developer decides)" — technical/implementation choices only (where a flag lives, data shape, remove-vs-hide as a pure technical matter).
   - "## ⚠️ Needs client decision" — business/product decisions only the client can make that remain unresolved (gate failed, or the 2-question budget is spent). The downstream coding agent routes these back to the client, so a client decision in the wrong section dead-ends at the developer. Never put a client decision under the developer heading.
 - Budget: at most TWICE per ticket, across turns, and only when the gate passes. A new client-only decision that first emerges from the client's answer to your first question is the canonical case for a second question (e.g. they say "move X to screen Y" — does "move" mean relocate, or also keep it on the old screen?). After two questions, never ask again — record any remainder under "## ⚠️ Needs client decision".
+- Bundling: when you do ask, fold the 1-3 most essential missing details into a SINGLE short Hebrew message. Do NOT split details that are knowable now across separate turns — the two-question budget is for a NEW decision that only surfaces after the client's first answer, not a license to ask sequentially what you could have bundled.
 - The test: could you write a precise, actionable issue WITHOUT inventing anything? If a detail essential to acting on the request is missing, prefer ask_clarifying_question (one short Hebrew message) over guessing — even when the message has concrete signal about what subsystem it touches. Essential details include:
   - the desired end-state or value — e.g. "change the button color" → which color?; "rename the field" → to what text?
   - the specific target — which screen, element, page, or flow.
@@ -221,13 +223,13 @@ export function buildClassifierSystem(args: BuildArgs): SystemBlock[] {
   );
 
   if (args.pending_clarification) {
-    const atCap = args.pending_clarification.questions_asked >= 2;
+    const atCap = args.pending_clarification.questions_asked >= MAX_TICKET_CLARIFICATIONS;
     liveSections.push(
       `\nEarlier you asked the client: "${args.pending_clarification.asked_question_he}"`,
       `Their original message was: "${args.pending_clarification.original_message}"`,
       `The CURRENT MESSAGE above is their answer.`,
       atCap
-        ? `You have already asked the client the maximum (2 questions). Do NOT ask again — produce a final classification now. Place any remaining client-only decision under a "## ⚠️ Needs client decision" section in the body, never under developer questions.`
+        ? `You have already asked the client the maximum (${MAX_TICKET_CLARIFICATIONS} questions). Do NOT ask again — produce a final classification now. Place any remaining client-only decision under a "## ⚠️ Needs client decision" section in the body, never under developer questions.`
         : `Produce a final classification UNLESS a NEW client-only decision emerged from their answer that passes the clarifying-question gate (client-only AND outcome-changing AND no safe default) — in that case you may ask exactly ONE more focused question. Otherwise do not ask again; write the issue, placing any unresolved client-only decision under "## ⚠️ Needs client decision".`
     );
   }

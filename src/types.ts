@@ -1,6 +1,12 @@
 // All shared types used across the worker. Keep this file flat and additive —
 // every new module reads from here, so type renames cascade.
 
+// Hard ceiling on clarifying questions across ALL turns of one ticket. Lives
+// here (dependency-free) so the dispatcher (enforcement) and the classifier
+// prompt builder (the model-facing instruction) share one source of truth —
+// if this changes, both the cap and what the model is told change together.
+export const MAX_TICKET_CLARIFICATIONS = 2;
+
 export interface ProjectRecord {
   id: string;                  // slug, unique within this client; e.g. "acme-core"
   name_he: string;             // display name in Hebrew; e.g. "אקמי קור"

@@ -1,5 +1,6 @@
 import type { GitHubClient } from "../lib/github";
 import type { RetrievedChunk } from "../types";
+import { MAX_TICKET_CLARIFICATIONS } from "../types";
 
 export interface ToolCall { name: string; input: any }
 export interface ToolResult { is_error: boolean; content: string; pause_for_clarification?: boolean }
@@ -33,10 +34,12 @@ export function isLowGrounding(g: GroundingStats): boolean {
 }
 
 const MAX_TOOL_CALLS = 4;
-// Hard ceiling on clarifying questions across ALL turns of one ticket. The
-// per-run loop pauses after a single ask, so within one run at most one is sent;
-// this cap spans the multi-turn conversation via priorQuestionsAsked.
-export const MAX_TICKET_CLARIFICATIONS = 2;
+// MAX_TICKET_CLARIFICATIONS (the per-ticket ceiling) is defined in ../types so
+// the dispatcher and the classifier prompt share one source of truth. Re-exported
+// here for callers that import it from the dispatcher. The per-run loop pauses
+// after a single ask, so within one run at most one is sent; the cap spans the
+// multi-turn conversation via priorQuestionsAsked.
+export { MAX_TICKET_CLARIFICATIONS };
 
 export class ToolDispatcher {
   private toolCallCount = 0;
