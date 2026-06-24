@@ -180,7 +180,11 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
     raw_message_text: parsed.text,
     attachments_summary: attachments.map((a) => a.kind).join(", "),
     pending_clarification: pending
-      ? { asked_question_he: pending.asked_question_he, original_message: pending.raw_message_text }
+      ? {
+          asked_question_he: pending.asked_question_he,
+          original_message: pending.raw_message_text,
+          questions_asked: pending.questions_asked ?? 0,
+        }
       : null,
     prior_conversation,
   });
@@ -236,6 +240,7 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
     }
   }
 
+  const priorQuestionsAsked = pending?.questions_asked ?? 0;
   const dispatcher = new ToolDispatcher(gh, activeProject.repo, async (q, _reason) => {
     await tg.sendMessage(parsed.chat_id, q);
     await putPending(env, parsed.tg_user_id, activeProject.id, {
@@ -244,11 +249,12 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
       attachments,
       asked_question_he: q,
       asked_at: new Date().toISOString(),
+      questions_asked: priorQuestionsAsked + 1,
     });
   }, shadowRetrieve, semanticOn ? async (query: string) => {
     const res = await retrieveFn(env, activeProject.repo, query);
     return res.status === "ok" ? res.chunks : [];
-  } : undefined);
+  } : undefined, priorQuestionsAsked);
 
   const classifyImpl = deps.classify ?? runClassifier;
   const transcript = attachments.find((a) => a.transcription)?.transcription;

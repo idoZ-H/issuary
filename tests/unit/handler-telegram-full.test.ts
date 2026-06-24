@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { env } from "cloudflare:test";
 import { handleTelegramWebhook } from "../../src/handlers/telegram";
-import { putClient, putRepoContext, getRecentClassifications } from "../../src/lib/kv";
+import { putClient, putRepoContext, getRecentClassifications, getPending } from "../../src/lib/kv";
 
 const SECRET = "tg-secret";
 
@@ -148,5 +148,42 @@ describe("handleTelegramWebhook end-to-end (mocked deps)", () => {
     const body = await res.json<any>();
     expect(body.action).toBe("asked_clarifying_question");
     expect(body.question_he).toBe("תוכל להבהיר?");
+  });
+
+  it("records questions_asked=1 in pending when the classifier asks its first question", async () => {
+    await putClient(env as any, 51, {
+      name: "Z", telegram_chat_id: 51,
+      active: true, created_at: "2026-04-29T00:00:00Z",
+      projects: [{ id: "proj-z", name_he: "z", repo: "x/z", created_at: "2026-04-29T00:00:00Z" }],
+      active_project_id: "proj-z", default_project_id: "proj-z",
+    });
+    await putRepoContext(env as any, "x/z", {
+      tree: "src/", readme: "R", recent_issues: [], fetched_at: "t",
+    });
+    const fakeTg = {
+      sendMessage: vi.fn(async () => ({ message_id: 1 })),
+      react: vi.fn(async () => undefined),
+      getFilePath: vi.fn(),
+      downloadFile: vi.fn(),
+    };
+    const update = {
+      update_id: 1,
+      message: { message_id: 1, from: { id: 51, first_name: "Z" }, chat: { id: 51 }, date: 1, text: "ambiguous?" },
+    };
+    const req = new Request("https://w/telegram/webhook", {
+      method: "POST",
+      headers: { "X-Telegram-Bot-Api-Secret-Token": SECRET, "content-type": "application/json" },
+      body: JSON.stringify(update),
+    });
+    await handleTelegramWebhook(req, env as any, {
+      tgFactory: () => fakeTg as any,
+      ghFactory: () => ({ getRepoTree: async () => [], getReadme: async () => "", listRecentIssues: async () => [] } as any),
+      classify: (async (a: any) => {
+        await a.dispatcher.dispatch({ name: "ask_clarifying_question", input: { question_he: "תוכל להבהיר?", reason_en: "r" } });
+        return { kind: "clarify" as const, question_he: "תוכל להבהיר?" };
+      }) as any,
+    });
+    const pend = await getPending(env as any, 51, "proj-z");
+    expect(pend?.questions_asked).toBe(1);
   });
 });
