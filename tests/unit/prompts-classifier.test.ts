@@ -113,4 +113,14 @@ describe("buildClassifierSystem", () => {
     expect(live.text).toMatch(/Needs client decision/i);
     expect(live.text).not.toMatch(/may ask exactly ONE more/i);
   });
+
+  it("states the 3-part client-decision gate in the preamble", () => {
+    const [cached] = buildClassifierSystem({
+      reporter_name: "X", repo: "o/r", repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
+      raw_message_text: "x", attachments_summary: "", prior_conversation: [], pending_clarification: null,
+    });
+    expect(cached!.text).toMatch(/client-only/i);
+    expect(cached!.text).toMatch(/no safe default/i);
+    expect(cached!.text).toMatch(/at most twice|two questions/i);
+  });
 });
