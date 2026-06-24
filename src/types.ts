@@ -111,6 +111,9 @@ export interface PendingClassification {
   attachments: AttachmentRef[];
   asked_question_he: string;
   asked_at: string;
+  // Number of clarifying questions already asked across this ticket's turns.
+  // Optional: legacy KV records and some test fixtures omit it — read with `?? 0`.
+  questions_asked?: number;
 }
 
 export interface AttachmentRef {

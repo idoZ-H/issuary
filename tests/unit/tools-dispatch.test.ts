@@ -61,6 +61,28 @@ describe("ToolDispatcher", () => {
     expect(sendQ).toHaveBeenCalledOnce();
   });
 
+  it("allows a second clarifying question across turns when one was already asked", async () => {
+    const sendQ = vi.fn(async () => {});
+    const gh = fakeGh();
+    // priorQuestionsAsked = 1 (one asked on a previous turn)
+    const d = new ToolDispatcher(gh as any, repo, sendQ, undefined, undefined, 1);
+    const r = await d.dispatch({ name: "ask_clarifying_question", input: { question_he: "q2?", reason_en: "new client decision" } });
+    expect(r.is_error).toBe(false);
+    expect(r.pause_for_clarification).toBe(true);
+    expect(sendQ).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a clarifying question once the ticket already used both (priorQuestionsAsked=2)", async () => {
+    const sendQ = vi.fn(async () => {});
+    const gh = fakeGh();
+    const d = new ToolDispatcher(gh as any, repo, sendQ, undefined, undefined, 2);
+    const r = await d.dispatch({ name: "ask_clarifying_question", input: { question_he: "q3?", reason_en: "r" } });
+    expect(r.is_error).toBe(true);
+    expect(r.content).toMatch(/budget exhausted/i);
+    expect(r.content).toMatch(/Needs client decision/i);
+    expect(sendQ).not.toHaveBeenCalled();
+  });
+
   it("returns an error result when a downstream tool throws", async () => {
     const gh = fakeGh({ searchCode: vi.fn(async () => { throw new Error("boom"); }) });
     const d = new ToolDispatcher(gh as any, repo, async () => {});

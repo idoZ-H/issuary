@@ -33,7 +33,10 @@ export function isLowGrounding(g: GroundingStats): boolean {
 }
 
 const MAX_TOOL_CALLS = 4;
-const MAX_CLARIFICATIONS = 1;
+// Hard ceiling on clarifying questions across ALL turns of one ticket. The
+// per-run loop pauses after a single ask, so within one run at most one is sent;
+// this cap spans the multi-turn conversation via priorQuestionsAsked.
+export const MAX_TICKET_CLARIFICATIONS = 2;
 
 export class ToolDispatcher {
   private toolCallCount = 0;
@@ -63,13 +66,23 @@ export class ToolDispatcher {
     // also returns semantic, content-based matches from the vector index. These
     // are reliable even when GitHub's code-search index is empty on private
     // repos. Returns [] when the index is still warming or has no match.
-    private readonly retrieveActive?: (query: string) => Promise<RetrievedChunk[]>
+    private readonly retrieveActive?: (query: string) => Promise<RetrievedChunk[]>,
+    // Clarifying questions already asked on PRIOR turns of this ticket (from the
+    // pending-state counter). Combined with this run's clarificationCount to
+    // enforce MAX_TICKET_CLARIFICATIONS across turns. Defaults to 0 (fresh ticket).
+    private readonly priorQuestionsAsked: number = 0
   ) {}
 
   async dispatch(call: ToolCall): Promise<ToolResult> {
     if (call.name === "ask_clarifying_question") {
-      if (this.clarificationCount >= MAX_CLARIFICATIONS) {
-        return { is_error: true, content: "Clarification budget exhausted — already asked once. Produce a final classification with needs-triage label." };
+      const totalAsked = this.priorQuestionsAsked + this.clarificationCount;
+      // Per-run cap (loop pauses after one) OR ticket-level ceiling across turns.
+      if (this.clarificationCount >= 1 || totalAsked >= MAX_TICKET_CLARIFICATIONS) {
+        return {
+          is_error: true,
+          content:
+            "Clarification budget exhausted (max 2 per ticket). Produce a final classification now; place any remaining client-only decision under a '## ⚠️ Needs client decision' section in the body, not under developer questions.",
+        };
       }
       this.clarificationCount++;
       try {
