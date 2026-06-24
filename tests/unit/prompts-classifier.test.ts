@@ -85,11 +85,32 @@ describe("buildClassifierSystem", () => {
       repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
       raw_message_text: "the dashboard one",
       attachments_summary: "",
-      pending_clarification: { asked_question_he: "תוכל להבהיר?", original_message: "broken" },
+      pending_clarification: { asked_question_he: "תוכל להבהיר?", original_message: "broken", questions_asked: 1 },
       prior_conversation: [],
     });
     expect(blocks[1]!.text).toContain("Earlier you asked");
     expect(blocks[1]!.text).toContain("the dashboard one");
     expect(blocks[1]!.text).toContain("broken");
+  });
+
+  it("answer-turn with one prior question allows a gated second question", () => {
+    const live = buildClassifierSystem({
+      reporter_name: "X", repo: "o/r", repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
+      raw_message_text: "move it to attendance", attachments_summary: "", prior_conversation: [],
+      pending_clarification: { asked_question_he: "?", original_message: "orig", questions_asked: 1 },
+    })[1]!;
+    expect(live.text).toMatch(/may ask exactly ONE more/i);
+    expect(live.text).not.toMatch(/already asked the client the maximum/i);
+  });
+
+  it("answer-turn at the cap forbids further questions", () => {
+    const live = buildClassifierSystem({
+      reporter_name: "X", repo: "o/r", repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
+      raw_message_text: "answer", attachments_summary: "", prior_conversation: [],
+      pending_clarification: { asked_question_he: "?", original_message: "orig", questions_asked: 2 },
+    })[1]!;
+    expect(live.text).toMatch(/already asked the client the maximum/i);
+    expect(live.text).toMatch(/Needs client decision/i);
+    expect(live.text).not.toMatch(/may ask exactly ONE more/i);
   });
 });

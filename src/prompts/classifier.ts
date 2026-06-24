@@ -6,7 +6,11 @@ export interface BuildArgs {
   repo_context: RepoContext;
   raw_message_text: string;
   attachments_summary: string;
-  pending_clarification: { asked_question_he: string; original_message: string } | null;
+  pending_clarification: {
+    asked_question_he: string;
+    original_message: string;
+    questions_asked: number;
+  } | null;
   prior_conversation: ConversationTurn[];
 }
 
@@ -201,10 +205,14 @@ export function buildClassifierSystem(args: BuildArgs): SystemBlock[] {
   );
 
   if (args.pending_clarification) {
+    const atCap = args.pending_clarification.questions_asked >= 2;
     liveSections.push(
       `\nEarlier you asked the client: "${args.pending_clarification.asked_question_he}"`,
       `Their original message was: "${args.pending_clarification.original_message}"`,
-      `The CURRENT MESSAGE above is their answer. Do not ask another clarifying question — produce a final classification.`
+      `The CURRENT MESSAGE above is their answer.`,
+      atCap
+        ? `You have already asked the client the maximum (2 questions). Do NOT ask again — produce a final classification now. Place any remaining client-only decision under a "## ⚠️ Needs client decision" section in the body, never under developer questions.`
+        : `Produce a final classification UNLESS a NEW client-only decision emerged from their answer that passes the clarifying-question gate (client-only AND outcome-changing AND no safe default) — in that case you may ask exactly ONE more focused question. Otherwise do not ask again; write the issue, placing any unresolved client-only decision under "## ⚠️ Needs client decision".`
     );
   }
 
