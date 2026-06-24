@@ -122,5 +122,6 @@ describe("buildClassifierSystem", () => {
     expect(cached!.text).toMatch(/client-only/i);
     expect(cached!.text).toMatch(/no safe default/i);
     expect(cached!.text).toMatch(/at most twice|two questions/i);
+    expect(cached!.text).not.toMatch(/one clarifying question per ticket/i);
   });
 });
