@@ -81,7 +81,7 @@ export class ToolDispatcher {
         return {
           is_error: true,
           content:
-            "Clarification budget exhausted (max 2 per ticket). Produce a final classification now; place any remaining client-only decision under a '## ⚠️ Needs client decision' section in the body, not under developer questions.",
+            `Clarification budget exhausted (max ${MAX_TICKET_CLARIFICATIONS} per ticket). Produce a final classification now; place any remaining client-only decision under a '## ⚠️ Needs client decision' section in the body, not under developer questions.`,
         };
       }
       this.clarificationCount++;
