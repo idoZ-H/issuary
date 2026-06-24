@@ -124,4 +124,16 @@ describe("buildClassifierSystem", () => {
     expect(cached!.text).toMatch(/at most twice|two questions/i);
     expect(cached!.text).not.toMatch(/one clarifying question per ticket/i);
   });
+
+  it("teaches the two-section body split and never files client decisions as developer questions", () => {
+    const [cached] = buildClassifierSystem({
+      reporter_name: "X", repo: "o/r", repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
+      raw_message_text: "x", attachments_summary: "", prior_conversation: [], pending_clarification: null,
+    });
+    // Both section headings are documented in the prompt.
+    expect(cached!.text).toMatch(/## Open questions \(developer decides\)/);
+    expect(cached!.text).toMatch(/## ⚠️ Needs client decision/);
+    // The absence "move = relocate or duplicate" boundary is taught as an example.
+    expect(cached!.text).toMatch(/relocate|move it to|attendance screen/i);
+  });
 });
