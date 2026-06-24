@@ -85,11 +85,55 @@ describe("buildClassifierSystem", () => {
       repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
       raw_message_text: "the dashboard one",
       attachments_summary: "",
-      pending_clarification: { asked_question_he: "תוכל להבהיר?", original_message: "broken" },
+      pending_clarification: { asked_question_he: "תוכל להבהיר?", original_message: "broken", questions_asked: 1 },
       prior_conversation: [],
     });
     expect(blocks[1]!.text).toContain("Earlier you asked");
     expect(blocks[1]!.text).toContain("the dashboard one");
     expect(blocks[1]!.text).toContain("broken");
+  });
+
+  it("answer-turn with one prior question allows a gated second question", () => {
+    const live = buildClassifierSystem({
+      reporter_name: "X", repo: "o/r", repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
+      raw_message_text: "move it to attendance", attachments_summary: "", prior_conversation: [],
+      pending_clarification: { asked_question_he: "?", original_message: "orig", questions_asked: 1 },
+    })[1]!;
+    expect(live.text).toMatch(/may ask exactly ONE more/i);
+    expect(live.text).not.toMatch(/already asked the client the maximum/i);
+  });
+
+  it("answer-turn at the cap forbids further questions", () => {
+    const live = buildClassifierSystem({
+      reporter_name: "X", repo: "o/r", repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
+      raw_message_text: "answer", attachments_summary: "", prior_conversation: [],
+      pending_clarification: { asked_question_he: "?", original_message: "orig", questions_asked: 2 },
+    })[1]!;
+    expect(live.text).toMatch(/already asked the client the maximum/i);
+    expect(live.text).toMatch(/Needs client decision/i);
+    expect(live.text).not.toMatch(/may ask exactly ONE more/i);
+  });
+
+  it("states the 3-part client-decision gate in the preamble", () => {
+    const [cached] = buildClassifierSystem({
+      reporter_name: "X", repo: "o/r", repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
+      raw_message_text: "x", attachments_summary: "", prior_conversation: [], pending_clarification: null,
+    });
+    expect(cached!.text).toMatch(/client-only/i);
+    expect(cached!.text).toMatch(/no safe default/i);
+    expect(cached!.text).toMatch(/at most twice|two questions/i);
+    expect(cached!.text).not.toMatch(/one clarifying question per ticket/i);
+  });
+
+  it("teaches the two-section body split and never files client decisions as developer questions", () => {
+    const [cached] = buildClassifierSystem({
+      reporter_name: "X", repo: "o/r", repo_context: { tree: "", readme: "", recent_issues: [], fetched_at: "t" },
+      raw_message_text: "x", attachments_summary: "", prior_conversation: [], pending_clarification: null,
+    });
+    // Both section headings are documented in the prompt.
+    expect(cached!.text).toMatch(/## Open questions \(developer decides\)/);
+    expect(cached!.text).toMatch(/## ⚠️ Needs client decision/);
+    // The absence "move = relocate or duplicate" boundary is taught as an example.
+    expect(cached!.text).toMatch(/relocate|move it to|attendance screen/i);
   });
 });

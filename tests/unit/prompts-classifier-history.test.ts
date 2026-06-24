@@ -38,7 +38,7 @@ describe("buildClassifierSystem PRIOR_CONVERSATION", () => {
     const blocks = buildClassifierSystem({
       reporter_name: "Y", repo: "x/y", repo_context: repoCtx,
       raw_message_text: "hi", attachments_summary: "",
-      pending_clarification: { asked_question_he: "?", original_message: "orig" },
+      pending_clarification: { asked_question_he: "?", original_message: "orig", questions_asked: 1 },
       prior_conversation: turns,
     });
     const live = blocks[1]!.text;

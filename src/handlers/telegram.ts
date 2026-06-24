@@ -180,7 +180,13 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
     raw_message_text: parsed.text,
     attachments_summary: attachments.map((a) => a.kind).join(", "),
     pending_clarification: pending
-      ? { asked_question_he: pending.asked_question_he, original_message: pending.raw_message_text }
+      ? {
+          asked_question_he: pending.asked_question_he,
+          original_message: pending.raw_message_text,
+          // A pending record implies ≥1 question already asked; legacy records
+          // lack the field, so default to 1 (not 0) to keep the cap accurate.
+          questions_asked: pending.questions_asked ?? 1,
+        }
       : null,
     prior_conversation,
   });
@@ -236,19 +242,29 @@ export async function handleTelegramWebhook(req: Request, env: Env, deps: Telegr
     }
   }
 
+  // A pending record exists ONLY because a clarifying question was already sent,
+  // so a record missing the (newly added, optional) questions_asked field — a
+  // legacy record written before this deploy — means at least one was asked.
+  // Default to 1, not 0, or the cross-turn cap under-counts during rollout and
+  // could let a 3rd question through.
+  const priorQuestionsAsked = pending ? (pending.questions_asked ?? 1) : 0;
   const dispatcher = new ToolDispatcher(gh, activeProject.repo, async (q, _reason) => {
     await tg.sendMessage(parsed.chat_id, q);
     await putPending(env, parsed.tg_user_id, activeProject.id, {
-      raw_message_id: parsed.message_id,
-      raw_message_text: parsed.text,
-      attachments,
+      // Preserve the ORIGINAL request's context when re-asking on a later turn:
+      // overwriting with parsed.text would make the stored "original_message"
+      // the client's answer to the previous question, not their true request.
+      raw_message_id: pending?.raw_message_id ?? parsed.message_id,
+      raw_message_text: pending?.raw_message_text ?? parsed.text,
+      attachments: pending?.attachments ?? attachments,
       asked_question_he: q,
       asked_at: new Date().toISOString(),
+      questions_asked: priorQuestionsAsked + 1,
     });
   }, shadowRetrieve, semanticOn ? async (query: string) => {
     const res = await retrieveFn(env, activeProject.repo, query);
     return res.status === "ok" ? res.chunks : [];
-  } : undefined);
+  } : undefined, priorQuestionsAsked);
 
   const classifyImpl = deps.classify ?? runClassifier;
   const transcript = attachments.find((a) => a.transcription)?.transcription;

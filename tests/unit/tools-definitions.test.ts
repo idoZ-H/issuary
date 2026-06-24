@@ -30,4 +30,10 @@ describe("CLASSIFIER_TOOLS", () => {
       expect((t as any).strict).toBe(true);
     }
   });
+
+  it("ask_clarifying_question description allows up to two per ticket under the gate", () => {
+    const tool = CLASSIFIER_TOOLS.find((t) => t.name === "ask_clarifying_question")!;
+    expect(tool.description).toMatch(/at most twice per ticket/i);
+    expect(tool.description).not.toMatch(/at most once per ticket/i);
+  });
 });

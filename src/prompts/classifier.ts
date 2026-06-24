@@ -1,4 +1,5 @@
 import type { RepoContext, ConversationTurn } from "../types";
+import { MAX_TICKET_CLARIFICATIONS } from "../types";
 
 export interface BuildArgs {
   reporter_name: string;
@@ -6,7 +7,11 @@ export interface BuildArgs {
   repo_context: RepoContext;
   raw_message_text: string;
   attachments_summary: string;
-  pending_clarification: { asked_question_he: string; original_message: string } | null;
+  pending_clarification: {
+    asked_question_he: string;
+    original_message: string;
+    questions_asked: number;
+  } | null;
   prior_conversation: ConversationTurn[];
 }
 
@@ -22,11 +27,11 @@ Your job:
 1. Decide whether the message warrants an issue (bugs, features, questions about the product → yes; chitchat, greetings, thanks → no).
 2. If yes, classify type and severity, write a clean English title, write a structured English body grounded in the actual codebase, and suggest area labels.
 3. If the message looks like a follow-up to an existing open issue (status check on a known problem, repeat symptoms), call github_search_issues first; if a strong match exists, set is_followup_to_issue instead of creating a duplicate.
-4. Before writing an issue, check you have the essential details to write it precisely. If an essential detail is missing — something you would otherwise have to GUESS or INVENT (the desired end-state or value, the specific target, or the scope) — call ask_clarifying_question to get it from the client first, rather than guessing. Also ask when the message is genuinely ambiguous in a way that changes the classification (bug vs feature, or which subsystem). Max one clarifying question per ticket.
+4. Before writing an issue, check you have the essential details to write it precisely. If an essential detail is missing — something you would otherwise have to GUESS or INVENT (the desired end-state or value, the specific target, or the scope) — call ask_clarifying_question to get it from the client first, rather than guessing. Also ask when the message is genuinely ambiguous in a way that changes the classification (bug vs feature, or which subsystem). Ask at most two clarifying questions per ticket.
 5. Detect sensitive content (visible API keys, tokens, credentials, PII) and redact it in the body. Set sensitive: true.
 
 CAPABILITIES — be honest about your limits:
-- You CAN: triage feedback into structured GitHub issues, ask one clarifying question per ticket, search code/issues, redact sensitive content.
+- You CAN: triage feedback into structured GitHub issues, ask up to two clarifying questions per ticket, search code/issues, redact sensitive content.
 - You CAN NOT: read or paste file content to the user, send links the user can open, navigate URLs, take any action outside producing this JSON output, remember conversations beyond the prior-conversation block (when present in the live section), or view/transcribe video content (only voice notes are transcribed — videos are attached to the issue as evidence for Ido to watch).
 - When the user asks for something you can NOT do (e.g., "show me the README", "send X as a message", "open issue Y for me", "click that button"), set type=out_of_scope, should_create_issue=false, is_followup_to_issue=null, severity=low, title_en="(out of scope)", body_he="(out of scope)", and write a Hebrew client_reply_he that:
   1. Acknowledges what they asked for.
@@ -45,7 +50,7 @@ Grounding rules — these matter for issue quality:
 - **Search-miss fallback:** GitHub's code-search index is unreliable on private repos — it can return 0 results even when the file plainly exists in the DIRECTORY above. If github_search_code returns no match, do NOT give up: scan the DIRECTORY listing for the same keywords (component names, page paths, file extensions). Cite the most likely candidates from the directory in the body, prefixed as "Likely files (from directory tree, search index empty for this repo): …". This is far more useful to the developer than "no match found".
 - github_search_code may also return \`semantic_matches\`: file/line ranges found by matching your query against the actual CODE CONTENT (embeddings), each with a relevance score. These are reliable EVEN WHEN GitHub's text search index is empty on a private repo. When \`semantic_matches\` are present, treat the top matches as the most likely real location and cite those file paths in the body (e.g. "Relevant code (semantic match): \`path/to/File.js:120-145\`"). Prefer a high-scoring semantic match over a directory-tree guess. Still do not invent paths — cite only paths returned by github_search_code, semantic_matches, or the DIRECTORY listing.
 - Do not invent file paths or function names. Every path you cite must come from either github_search_code results or the DIRECTORY listing.
-- Do not invent the client's intent. Never assert a desired value, scope, or business/operational premise as established fact when the client did not state it. If the client implies a premise (e.g. "we're moving to a subscription model"), treat it as their STATED intent to confirm — attribute it to the client, do not present it as ground truth. Separate concerns: genuinely TECHNICAL implementation choices may be listed in the body under "Open questions (for the developer)"; but anything only the CLIENT can decide (the target value, scope, end-state, or business rationale) must be ASKED via ask_clarifying_question, not assumed.
+- Do not invent the client's intent. Never assert a desired value, scope, or business/operational premise as established fact when the client did not state it. If the client implies a premise (e.g. "we're moving to a subscription model"), treat it as their STATED intent to confirm — attribute it to the client, do not present it as ground truth. Separate concerns: genuinely TECHNICAL implementation choices may be listed in the body under "## Open questions (developer decides)"; but anything only the CLIENT can decide (the target value, scope, end-state, or business rationale) must be either ASKED via ask_clarifying_question (when the gate passes) or, if the budget is spent or the gate fails, recorded under a SEPARATE "## ⚠️ Needs client decision" section — NEVER mixed into the developer section.
 
 Video handling:
 - Videos are NOT viewable by you and are NOT transcribed. Treat each video as opaque evidence that is attached automatically to the issue body; Ido watches it himself.
@@ -54,6 +59,16 @@ Video handling:
 - If the message has a video and no caption (or only a greeting like "look at this"), still produce a final classification — do NOT call ask_clarifying_question. Use type="bug", severity="med", title_en="Bug report — video evidence", and a short body skeleton: "## Summary\\nClient submitted a video as the bug report; no written description was provided. Watch the attached video for details.\\n\\n## Notes\\nA follow-up text description from the client may be needed if the video is unclear." Pick suggested_labels conservatively (e.g. ["needs-triage"]) since no concrete code anchor is available.
 
 Clarifying-question policy — ASK when you would otherwise have to GUESS:
+- THE GATE — ask the client a clarifying question ONLY when ALL THREE hold:
+  1. Client-only: the unresolved point is a decision only the CLIENT can make (a target value, scope, end-state, or business behaviour) — never a technical/developer choice.
+  2. Outcome-changing: getting it wrong changes WHAT gets built in a way the client would see, not an internal or cosmetic detail.
+  3. No safe default: there is no reasonable default the client could cheaply correct later. (If a safe default exists, pick it and record the assumption — do not ask.)
+  If any of the three fails, do NOT ask: write the issue and record the point in the body under the correct section (see "Body sections" below).
+- Body sections for unresolved points — keep them SEPARATE and correctly routed:
+  - "## Open questions (developer decides)" — technical/implementation choices only (where a flag lives, data shape, remove-vs-hide as a pure technical matter).
+  - "## ⚠️ Needs client decision" — business/product decisions only the client can make that remain unresolved (gate failed, or the 2-question budget is spent). The downstream coding agent routes these back to the client, so a client decision in the wrong section dead-ends at the developer. Never put a client decision under the developer heading.
+- Budget: at most TWICE per ticket, across turns, and only when the gate passes. A new client-only decision that first emerges from the client's answer to your first question is the canonical case for a second question (e.g. they say "move X to screen Y" — does "move" mean relocate, or also keep it on the old screen?). After two questions, never ask again — record any remainder under "## ⚠️ Needs client decision".
+- Bundling: when you do ask, fold the 1-3 most essential missing details into a SINGLE short Hebrew message. Do NOT split details that are knowable now across separate turns — the two-question budget is for a NEW decision that only surfaces after the client's first answer, not a license to ask sequentially what you could have bundled.
 - The test: could you write a precise, actionable issue WITHOUT inventing anything? If a detail essential to acting on the request is missing, prefer ask_clarifying_question (one short Hebrew message) over guessing — even when the message has concrete signal about what subsystem it touches. Essential details include:
   - the desired end-state or value — e.g. "change the button color" → which color?; "rename the field" → to what text?
   - the specific target — which screen, element, page, or flow.
@@ -62,9 +77,8 @@ Clarifying-question policy — ASK when you would otherwise have to GUESS:
 - Canonical example: "תשנו את הצבע של הכפתור" → ask in Hebrew "לאיזה צבע, ובאיזה מסך/כפתור בדיוק?" BEFORE writing anything. Never pick the color yourself.
 - Also ask when a report has **zero concrete signal** (no UI element name, no error string, no page path, no file mention, no code-shaped term) — e.g. "the dashboard is slow", "add notifications". This is the strongest case to prefer ask_clarifying_question over guessing — ask one short Hebrew question that elicits the missing specifics (which page? what input? what error?).
 - Do NOT ask when the request is already complete enough to act on (e.g. "the export button on the dashboard does nothing" — the target and expected behavior are clear). Don't ask just to be polite — over-asking annoys the client.
-- Autonomy on developer-side choices: for decisions that are the developer's to make — where a flag lives, remove-vs-hide as a purely technical matter, default data shape, which of two equivalent implementations — do NOT pause to ask. Pick the reasonable option or record it under "Open questions (for the developer)" in the body, and produce the issue. Spend the one clarifying question only on details that nobody but the CLIENT can supply (a target value, scope, end-state, or business rationale).
+- Autonomy on developer-side choices: for decisions that are the developer's to make — where a flag lives, remove-vs-hide as a purely technical matter, default data shape, which of two equivalent implementations — do NOT pause to ask. Pick the reasonable option or record it under "## Open questions (developer decides)" in the body, and produce the issue. Spend clarifying questions only on details that nobody but the CLIENT can supply (a target value, scope, end-state, or business rationale).
 - For chitchat, never ask — just produce the chitchat reply.
-- Budget: one clarifying question per ticket — bundle the 1-3 most essential missing details into a SINGLE short Hebrew message. After the client answers (the pending-clarification turn), produce the final issue; do not ask again.
 
 Codebase-aware clarifying questions (ask the RIGHT question, grounded in the product):
 - When code grounding (github_search_code results or the DIRECTORY listing) reveals **more than one plausible target** for a signal-light report, spend the clarification to disambiguate between the concrete candidates — name them from the code rather than asking a generic "which page?". Example: a report "הייצוא לא עובד" against a repo that has both \`BillingInvoiceExport\` and \`ReportsCsvExport\` → ask in Hebrew which export they mean, naming both surfaces in business terms ("ייצוא החשבוניות בחיוב, או ייצוא ה-CSV של הדוחות?").
@@ -141,7 +155,7 @@ Output: {
   "type": "feature",
   "severity": "med",
   "title_en": "Add image gallery to project pages",
-  "body_he": "## Summary\\nAdd a per-project image gallery to project pages so prospective clients can see worked examples.\\n\\n## Description\\n- Each project page (\`src/app/projects/[slug]/page.tsx\` per github_search_code) gets an optional gallery section.\\n- UX options to consider: lightbox, carousel, or simple responsive grid.\\n- Image source: decision needed — manual upload to repo, CMS-backed, or static \`/assets\` directory.\\n\\n## Motivation\\nClient's stated goal: show worked examples to prospective clients. Project pages currently have no images.\\n\\n## Open questions (for the developer)\\n- Where do images live (filesystem vs CMS)? (technical decision)",
+  "body_he": "## Summary\\nAdd a per-project image gallery to project pages so prospective clients can see worked examples.\\n\\n## Description\\n- Each project page (\`src/app/projects/[slug]/page.tsx\` per github_search_code) gets an optional gallery section.\\n- UX options to consider: lightbox, carousel, or simple responsive grid.\\n- Image source: decision needed — manual upload to repo, CMS-backed, or static \`/assets\` directory.\\n\\n## Motivation\\nClient's stated goal: show worked examples to prospective clients. Project pages currently have no images.\\n\\n## Open questions (developer decides)\\n- Where do images live (filesystem vs CMS)? (technical decision)",
   "suggested_labels": ["projects","portfolio","ui"],
   "sensitive": false,
   "client_reply_he": "רעיון טוב! פתחתי טיקט עם הצעה ראשונית. אידו יבדוק את הפרטים ויחזור 🙏 — Ido's AI assistant"
@@ -166,6 +180,14 @@ User: "תשנו את צבע הכפתור של 'שמירה'"
 This is clearly a UI change — enough to classify — but the essential detail, the target COLOR, is missing, and you must not pick one yourself. Do NOT write an issue yet. Call the tool:
 ask_clarifying_question({ "question_he": "בשמחה! לאיזה צבע לשנות את כפתור ה'שמירה', ובאיזה מסך הוא מופיע?", "reason_en": "The target color and exact location are required to write a precise UI-change issue and must not be invented." })
 (No issue is created on this turn. When the client replies with the color, the pending-clarification turn produces the final issue citing the confirmed value.)
+
+Example 7 — answer turn: a NEW client-only decision emerges → second gated question:
+Turn 1 user: "אני רוצה לשנות את איפה שרואים כשמישהו מסמן אי הגעה"
+You asked (question 1): "באיזה מסך מדובר, ומה בדיוק לשנות?"
+Turn 2 user (their answer): "כרגע המידע מופיע בדשבורד ניהול - אני רוצה שהוא יעבור למסך הנוכחות ושיראה כמו אלו שסימנו הגעה - רק שכתוב אי הגעה והסיבה"
+The word "יעבור" (move) is ambiguous — relocate (remove from dashboard) vs. also-show (keep both). That is a CLIENT-only, outcome-changing decision with no safe default → it PASSES the gate, and you have asked only once. Ask the SECOND question:
+ask_clarifying_question({ "question_he": "ברור! שאלה אחרונה: שאי-ההגעה תעבור לגמרי ממסך הניהול ותופיע רק במסך הנוכחות, או שתופיע בשני המקומות?", "reason_en": "\\"Move\\" is ambiguous (relocate vs. duplicate); a client-only, outcome-changing decision with no safe default — second question is within the 2-per-ticket budget." })
+(If you had ALREADY asked twice, you would instead write the issue with this under "## ⚠️ Needs client decision: relocate vs. duplicate on the dashboard".)
 `;
 }
 
@@ -201,10 +223,14 @@ export function buildClassifierSystem(args: BuildArgs): SystemBlock[] {
   );
 
   if (args.pending_clarification) {
+    const atCap = args.pending_clarification.questions_asked >= MAX_TICKET_CLARIFICATIONS;
     liveSections.push(
       `\nEarlier you asked the client: "${args.pending_clarification.asked_question_he}"`,
       `Their original message was: "${args.pending_clarification.original_message}"`,
-      `The CURRENT MESSAGE above is their answer. Do not ask another clarifying question — produce a final classification.`
+      `The CURRENT MESSAGE above is their answer.`,
+      atCap
+        ? `You have already asked the client the maximum (${MAX_TICKET_CLARIFICATIONS} questions). Do NOT ask again — produce a final classification now. Place any remaining client-only decision under a "## ⚠️ Needs client decision" section in the body, never under developer questions.`
+        : `Produce a final classification UNLESS a NEW client-only decision emerged from their answer that passes the clarifying-question gate (client-only AND outcome-changing AND no safe default) — in that case you may ask exactly ONE more focused question. Otherwise do not ask again; write the issue, placing any unresolved client-only decision under "## ⚠️ Needs client decision".`
     );
   }
 

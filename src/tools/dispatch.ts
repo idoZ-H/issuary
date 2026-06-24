@@ -1,5 +1,6 @@
 import type { GitHubClient } from "../lib/github";
 import type { RetrievedChunk } from "../types";
+import { MAX_TICKET_CLARIFICATIONS } from "../types";
 
 export interface ToolCall { name: string; input: any }
 export interface ToolResult { is_error: boolean; content: string; pause_for_clarification?: boolean }
@@ -33,7 +34,12 @@ export function isLowGrounding(g: GroundingStats): boolean {
 }
 
 const MAX_TOOL_CALLS = 4;
-const MAX_CLARIFICATIONS = 1;
+// MAX_TICKET_CLARIFICATIONS (the per-ticket ceiling) is defined in ../types so
+// the dispatcher and the classifier prompt share one source of truth. Re-exported
+// here for callers that import it from the dispatcher. The per-run loop pauses
+// after a single ask, so within one run at most one is sent; the cap spans the
+// multi-turn conversation via priorQuestionsAsked.
+export { MAX_TICKET_CLARIFICATIONS };
 
 export class ToolDispatcher {
   private toolCallCount = 0;
@@ -63,13 +69,23 @@ export class ToolDispatcher {
     // also returns semantic, content-based matches from the vector index. These
     // are reliable even when GitHub's code-search index is empty on private
     // repos. Returns [] when the index is still warming or has no match.
-    private readonly retrieveActive?: (query: string) => Promise<RetrievedChunk[]>
+    private readonly retrieveActive?: (query: string) => Promise<RetrievedChunk[]>,
+    // Clarifying questions already asked on PRIOR turns of this ticket (from the
+    // pending-state counter). Combined with this run's clarificationCount to
+    // enforce MAX_TICKET_CLARIFICATIONS across turns. Defaults to 0 (fresh ticket).
+    private readonly priorQuestionsAsked: number = 0
   ) {}
 
   async dispatch(call: ToolCall): Promise<ToolResult> {
     if (call.name === "ask_clarifying_question") {
-      if (this.clarificationCount >= MAX_CLARIFICATIONS) {
-        return { is_error: true, content: "Clarification budget exhausted — already asked once. Produce a final classification with needs-triage label." };
+      const totalAsked = this.priorQuestionsAsked + this.clarificationCount;
+      // Per-run cap (loop pauses after one) OR ticket-level ceiling across turns.
+      if (this.clarificationCount >= 1 || totalAsked >= MAX_TICKET_CLARIFICATIONS) {
+        return {
+          is_error: true,
+          content:
+            `Clarification budget exhausted (max ${MAX_TICKET_CLARIFICATIONS} per ticket). Produce a final classification now; place any remaining client-only decision under a '## ⚠️ Needs client decision' section in the body, not under developer questions.`,
+        };
       }
       this.clarificationCount++;
       try {

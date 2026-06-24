@@ -6,7 +6,7 @@ export const CLASSIFIER_TOOLS: Anthropic.Tool[] = [
   {
     name: "ask_clarifying_question",
     description:
-      "Pause classification and send a single Hebrew question to the client. Use ONLY when the message is genuinely ambiguous and the answer will materially change the issue type, severity, or affected area. Do NOT use to ask politeness questions, to confirm details that are clear from context, or when the message is non-actionable chitchat. You may call this tool at most once per ticket — calling it commits to using the client's reply as the final disambiguating signal. After this tool is called, do not produce a final classification on this turn; the worker will pause the loop and resume on the next user message.",
+      "Pause classification and send a single Hebrew question to the client. Use ONLY when a genuine ambiguity passes the gate: the unresolved point is (1) client-only — a decision only the client can make (target value, scope, end-state, or business behaviour), not a technical choice; (2) outcome-changing — getting it wrong changes what gets built in a client-visible way; and (3) has no safe default the client could cheaply correct later. Do NOT use for politeness, to confirm details clear from context, for chitchat, or for developer/technical decisions (those go in the issue body). You may call this tool at most twice per ticket across turns — typically once on the first message, and once more only if a NEW client-only decision emerges from the client's answer. After this tool is called, do not produce a final classification on this turn; the worker pauses the loop and resumes on the next user message.",
     input_schema: {
       type: "object",
       additionalProperties: false,
