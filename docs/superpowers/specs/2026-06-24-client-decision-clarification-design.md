@@ -81,23 +81,37 @@ decision still remains after 2 questions, stop asking and write it under
 ## Components
 
 ### 1. Pending-state counter (`src/types.ts:108`)
-`PendingClassification` gains `questions_asked: number`. Written as `1` when the
-first question is sent; read back on the answer turn to compute the ticket-level
-total.
+`PendingClassification` gains `questions_asked?: number` (**optional** — existing
+test fixtures and legacy KV records omit it; read with `?? 0`). Written as
+`(prior ?? 0) + 1` when a question is sent; read back on the answer turn to compute
+the ticket-level total.
 
 ### 2. Dispatcher ticket-level cap (`src/tools/dispatch.ts`)
-- Constructor gains `priorQuestionsAsked: number` (from `pending?.questions_asked ?? 0`).
-- Clarify branch rejects when `priorQuestionsAsked + clarificationCount >= 2`.
-- Correct the misleading "max one per ticket" comment (it is per-run today).
-- The send-callback writes `questions_asked: priorQuestionsAsked + 1` into the new
-  pending state.
+- Constructor gains `priorQuestionsAsked: number = 0` as the **last** param (after
+  `retrieveActive`), from `pending?.questions_asked ?? 0`. Last position keeps all
+  existing positional call sites and tests working.
+- Rename `MAX_CLARIFICATIONS` → `MAX_TICKET_CLARIFICATIONS = 2`.
+- Clarify branch rejects when **either** `clarificationCount >= 1` (per-run cap —
+  the loop pauses after one ask; preserves the existing "rejects a second ask in
+  one run" test) **or** `priorQuestionsAsked + clarificationCount >= 2`
+  (ticket-level ceiling across turns). Rejection content tells the model to write
+  the issue and put any remaining client-only decision under
+  `## ⚠️ Needs client decision`.
+- The send-callback (in the handler) writes `questions_asked: priorQuestionsAsked + 1`
+  into the new pending state.
 
 ### 3. Answer-turn prompt instruction (`src/prompts/classifier.ts:203-208`)
-Flip from *"Do not ask another clarifying question — produce a final classification"*
-to: *"This is the client's answer. Produce a final classification UNLESS a **new**
-client-only decision emerged from their answer that passes the gate — then you may
-ask exactly ONE more focused question. After two questions total, never ask again:
-write the issue with the unresolved point under `## ⚠️ Needs client decision`."*
+The prompt builder's `pending_clarification` arg gains `questions_asked: number` so
+the instruction is actionable. Render conditionally:
+- If `questions_asked >= 2`: *"You have already asked the client the maximum (2
+  questions). Do NOT ask again — produce a final classification, placing any
+  remaining client-only decision under `## ⚠️ Needs client decision`."*
+- Else (`questions_asked === 1`): flip from *"Do not ask another clarifying
+  question"* to *"This is the client's answer. Produce a final classification
+  UNLESS a **new** client-only decision emerged from their answer that passes the
+  gate — then you may ask exactly ONE more focused question."*
+
+The dispatcher (component 2) is the hard backstop if the model ignores this.
 
 ### 4. The gate, in prompt + tool description
 - Clarifying-policy section (`classifier.ts:56-72`): add the explicit 3-part gate.
@@ -114,11 +128,16 @@ write the issue with the unresolved point under `## ⚠️ Needs client decision
   to teach the boundary by the real failure. Update existing Example 4's
   *"Open questions (for the developer)"* heading to the new wording for consistency.
 
-### 6. Handler — don't clobber a re-ask (`src/handlers/telegram.ts:337`)
-The delete-pending line currently fires whenever the original `pending` was
-truthy. Guard it so a second question's freshly-written pending state survives —
-delete only on a **final** result, not a repeat `kind:"clarify"`. Thread
-`pending?.questions_asked ?? 0` into the dispatcher constructor (`telegram.ts:239`).
+### 6. Handler wiring (`src/handlers/telegram.ts`)
+No delete-pending guard needed — the `clarify` result branch (`telegram.ts:~331`)
+returns early and never reaches the `deletePending` line, which runs only on a
+`final` result. Two changes:
+- Thread `pending?.questions_asked ?? 0` into the dispatcher constructor as the
+  last arg (`telegram.ts:239`).
+- In the send-clarifying callback (`telegram.ts:241`), write
+  `questions_asked: (pending?.questions_asked ?? 0) + 1` into `putPending`.
+- Pass `questions_asked: pending.questions_asked ?? 0` into
+  `buildClassifierSystem`'s `pending_clarification` arg (`telegram.ts:182`).
 
 ## Net behavior
 
@@ -133,8 +152,9 @@ it from interrogating clients on clear, complete reports.
   `priorQuestionsAsked === 1`; rejects the 2nd when already at 2; counter
   increments correctly in the written pending state.
 - **Pending counter persistence:** `questions_asked` round-trips through KV.
-- **Handler:** a repeat `kind:"clarify"` on the answer turn does NOT delete pending;
-  a final result does.
+- **Prompt builder:** with `pending_clarification.questions_asked === 2`, the system
+  text contains the "do NOT ask again" instruction; with `=== 1`, it contains the
+  gated "you may ask ONE more" instruction.
 - **Taxonomy (classify-stub):** a business-decision output never renders under the
   developer heading; it renders under `## ⚠️ Needs client decision`.
 - Gate behavior (a prompt concern) is validated by replaying the real absence trace
